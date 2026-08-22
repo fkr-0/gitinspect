@@ -1,0 +1,34 @@
+version: 1
+name: gitinspect
+description: GPU-driven 3D Git repository visualization and mutation studio
+commands:
+  install:
+    run: [pnpm, install]
+    category: custom
+    timeoutMs: 120000
+  typecheck:
+    run: [pnpm, typecheck]
+    category: build
+    timeoutMs: 120000
+  test:
+    run: [pnpm, test]
+    category: test
+    timeoutMs: 120000
+  build:
+    run: [pnpm, build]
+    category: build
+    timeoutMs: 180000
+  check:
+    run: [pnpm, check]
+    category: test
+    timeoutMs: 300000
+agent:
+  notes: >-
+    Preserve unrelated changes, never write to bare /tmp, coordinate concurrent writes with
+    ws-bridge path claims, and keep mutations preview-first and copy-by-default.
+  tasks:
+    - Build graph-elements framework primitives.
+    - Build Rust/gix repository backend.
+    - Integrate Git mappings into the Tauri application.
+  changelog:
+    - Keep CHANGELOG.md updated under Unreleased for every meaningful change.
