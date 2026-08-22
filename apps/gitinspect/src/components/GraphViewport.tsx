@@ -133,7 +133,7 @@ export function GraphViewport({
         <div className="viewport__empty">
           <span className="viewport__reticle" aria-hidden="true" />
           <strong>Repository space is ready</strong>
-          <span>The Phase 3 renderer seam is waiting for a GraphDataset.</span>
+          <span>Open a repository to build its semantic Git world.</span>
         </div>
       )}
 
