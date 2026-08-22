@@ -28,6 +28,7 @@ fn opens_linear_history_and_serializes_contract_shape() {
     .unwrap();
     assert_eq!(snapshot.schema_version, 1);
     assert_eq!(snapshot.head.as_deref(), Some(second.as_str()));
+    assert_eq!(snapshot.head_ref.as_deref(), Some("refs/heads/main"));
     assert_eq!(snapshot.commits.len(), 2);
     assert_eq!(snapshot.commits[0].oid, second);
     assert_eq!(snapshot.commits[1].oid, first);
@@ -81,6 +82,22 @@ fn opens_linear_history_and_serializes_contract_shape() {
 }
 
 #[test]
+fn distinguishes_resolved_head_oid_from_symbolic_head_ref() {
+    let repo = FixtureRepo::new("head-semantics");
+    repo.write("one.txt", "one\n");
+    let oid = repo.commit_all("one");
+    let (handle, attached) = RepositoryService::open(&repo.path, OpenOptions::default()).unwrap();
+    assert_eq!(attached.head.as_deref(), Some(oid.as_str()));
+    assert_eq!(attached.head_ref.as_deref(), Some("refs/heads/main"));
+
+    repo.git(["checkout", "--detach", &oid]);
+    let detached = handle.refresh(OpenOptions::default()).unwrap();
+    assert_eq!(detached.head.as_deref(), Some(oid.as_str()));
+    assert_eq!(detached.head_ref, None);
+    assert_ne!(attached.revision, detached.revision);
+}
+
+#[test]
 fn handle_watch_coalesces_a_deterministic_event_source() {
     let repo = FixtureRepo::new("watch");
     repo.write("one.txt", "one\n");
@@ -112,6 +129,28 @@ fn handle_watch_coalesces_a_deterministic_event_source() {
         vec![ChangeReason::Head, ChangeReason::Refs]
     );
     assert_eq!(changes[1].reasons, vec![ChangeReason::Objects]);
+}
+
+#[test]
+fn native_watch_reports_fixture_repository_changes() {
+    let repo = FixtureRepo::new("native-watch");
+    repo.write("one.txt", "one\n");
+    repo.commit_all("one");
+    let (handle, _) = RepositoryService::open(&repo.path, OpenOptions::default()).unwrap();
+    let watcher = handle
+        .watch_native(WatchOptions { debounce_ms: 40 })
+        .expect("native watcher starts");
+
+    repo.git(["branch", "watched-branch"]);
+    let change = watcher
+        .recv_timeout(Duration::from_secs(3))
+        .expect("filesystem watcher reports the ref change");
+    assert!(
+        change.reasons.contains(&ChangeReason::Refs)
+            || change.reasons.contains(&ChangeReason::Unknown),
+        "unexpected reasons: {:?}",
+        change.reasons
+    );
 }
 
 #[test]

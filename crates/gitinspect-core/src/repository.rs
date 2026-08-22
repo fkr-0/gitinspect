@@ -26,6 +26,8 @@ pub enum Error {
     },
     #[error("path does not resolve to a Git repository: {0}")]
     NotRepository(PathBuf),
+    #[error("repository watcher operation failed: {0}")]
+    Watch(String),
 }
 
 impl Error {
@@ -45,9 +47,11 @@ impl RepositoryService {
         let repo = discover_repository(path.as_ref())?;
         let repository_path = canonical_repository_path(&repo)?;
         let git_dir = canonicalize(repo.git_dir())?;
+        let common_dir = canonicalize(repo.common_dir())?;
         let handle = RepositoryHandle {
             repository_path,
             git_dir,
+            common_dir,
         };
         let snapshot = snapshot_from_repo(&repo, &options)?;
         Ok((handle, snapshot))
@@ -58,6 +62,7 @@ impl RepositoryService {
 pub struct RepositoryHandle {
     repository_path: PathBuf,
     git_dir: PathBuf,
+    common_dir: PathBuf,
 }
 
 impl RepositoryHandle {
@@ -67,6 +72,10 @@ impl RepositoryHandle {
 
     pub fn git_dir(&self) -> &Path {
         &self.git_dir
+    }
+
+    pub fn common_dir(&self) -> &Path {
+        &self.common_dir
     }
 
     pub fn refresh(&self, options: OpenOptions) -> Result<GitRepositorySnapshot, Error> {
@@ -91,12 +100,18 @@ impl RepositoryHandle {
         })
     }
 
-    /// Adapt an event source into a coalesced repository-change receiver.
-    ///
-    /// This is deliberately filesystem-watcher agnostic. A later native adapter
-    /// can translate `notify`/platform events to [`RawWatchEvent`] without
-    /// changing the public change contract; tests can supply deterministic
-    /// timestamped events without sleeping or touching global filesystem state.
+    /// Start a native filesystem watcher for the per-worktree git directory and
+    /// its shared common directory (when different), preserving the same
+    /// coalesced change contract as the deterministic watcher core.
+    pub fn watch_native(
+        &self,
+        options: WatchOptions,
+    ) -> Result<crate::NativeRepositoryWatcher, Error> {
+        crate::watch::start_native_watch(self, options)
+    }
+
+    /// Adapt a deterministic raw event source into a coalesced change receiver.
+    /// Tests can use this path without sleeping or touching global watcher state.
     pub fn watch<I>(&self, events: I, options: WatchOptions) -> Receiver<RepositoryChange>
     where
         I: IntoIterator<Item = RawWatchEvent> + Send + 'static,
@@ -160,6 +175,11 @@ fn snapshot_from_repo(
     let repository_path = canonical_repository_path(repo)?;
     let git_dir = canonicalize(repo.git_dir())?;
     let head = repo.head_id().ok().map(|id| id.to_string());
+    let head_ref = repo
+        .head_name()
+        .ok()
+        .flatten()
+        .map(|name| name.as_bstr().to_str_lossy().into_owned());
     let mut refs = collect_refs(repo)?;
     let mut remotes = collect_remotes(repo)?;
     let hooks = collect_hooks(repo)?;
@@ -168,12 +188,19 @@ fn snapshot_from_repo(
     remotes.sort_by(|a, b| a.name.cmp(&b.name));
     let (commits, truncated) = collect_commits(repo, options, &refs)?;
 
-    let revision = revision_fingerprint(head.as_deref(), &refs, &remotes, &hooks);
+    let revision = revision_fingerprint(
+        head.as_deref(),
+        head_ref.as_deref(),
+        &refs,
+        &remotes,
+        &hooks,
+    );
     Ok(GitRepositorySnapshot {
         schema_version: 1,
         repository_path: path_to_string(&repository_path),
         git_dir: path_to_string(&git_dir),
         head,
+        head_ref,
         revision,
         commits,
         refs,
@@ -392,6 +419,7 @@ fn collect_hooks(repo: &gix::Repository) -> Result<Vec<String>, Error> {
 
 fn revision_fingerprint(
     head: Option<&str>,
+    head_ref: Option<&str>,
     refs: &[GitRefRecord],
     remotes: &[GitRemoteRecord],
     hooks: &[String],
@@ -400,6 +428,10 @@ fn revision_fingerprint(
     hasher.update(b"gitinspect-snapshot-v1\0");
     if let Some(head) = head {
         hasher.update(head.as_bytes());
+    }
+    hasher.update([0]);
+    if let Some(head_ref) = head_ref {
+        hasher.update(head_ref.as_bytes());
     }
     hasher.update([0]);
     for reference in refs {

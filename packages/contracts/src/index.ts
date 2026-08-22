@@ -143,12 +143,28 @@ export interface GitRepositorySnapshot {
   readonly schemaVersion: 1;
   readonly repositoryPath: string;
   readonly gitDir: string;
+  /** Resolved object ID currently selected by HEAD, when HEAD is born. */
   readonly head?: string;
+  /** Authoritative symbolic HEAD referent (for example refs/heads/main); absent when detached. */
+  readonly headRef?: string;
   readonly revision: string;
   readonly commits: readonly GitCommitRecord[];
   readonly refs: readonly GitRefRecord[];
   readonly remotes: readonly GitRemoteRecord[];
   readonly hooks: readonly string[];
+  readonly truncated: boolean;
+}
+
+export interface GitDiffOptions {
+  readonly maxBlobBytes: number;
+  readonly binaryProbeBytes: number;
+  readonly maxFiles: number;
+}
+
+export interface GitCommitDiff {
+  readonly oid: string;
+  readonly parentOid?: string;
+  readonly files: readonly GitCommitFileChange[];
   readonly truncated: boolean;
 }
 

@@ -13,4 +13,7 @@ mod watch;
 
 pub use model::*;
 pub use repository::{Error, RepositoryHandle, RepositoryService};
-pub use watch::{ChangeReason, RawWatchEvent, RepositoryChange, WatchCoalescer, WatchOptions};
+pub use watch::{
+    ChangeReason, NativeRepositoryWatcher, RawWatchEvent, RepositoryChange, WatchCoalescer,
+    WatchOptions,
+};

@@ -50,8 +50,12 @@ pub struct GitRepositorySnapshot {
     pub schema_version: u8,
     pub repository_path: String,
     pub git_dir: String,
+    /// Resolved object ID currently selected by HEAD, when HEAD is born.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub head: Option<String>,
+    /// Authoritative symbolic HEAD referent; absent for detached HEAD.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head_ref: Option<String>,
     pub revision: String,
     pub commits: Vec<GitCommitRecord>,
     pub refs: Vec<GitRefRecord>,
