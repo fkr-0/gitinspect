@@ -14,4 +14,5 @@
 - Git-agnostic batched 3D graph rendering with configurable world lighting, procedural node primitives, styled/animated edge paths, and semantic render identities for picking.
 - Generic attached/free-flight camera controls, semantic picking/selection interactions, delayed hover tooltips, and LOD-aware label policies for graph-elements.
 - Deterministic generic hierarchical layout, scalable LOD planning, domain-adapter transactions, and restorable async world drill-down navigation.
+- R3F JSX type augmentation is carried through the graph-elements public barrel so TypeScript consumers can compile exported 3D components without app-local type shims.
 

@@ -1,3 +1,5 @@
+import type {} from "./rendering/r3f-jsx";
+
 export type {
   CameraMode,
   CameraState,
