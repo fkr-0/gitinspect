@@ -30,6 +30,12 @@ Acceptance: implementation tracks have non-overlapping initial path ownership an
 
 ## Phase 3 — parallel framework/backend implementation
 
+Status: **complete** at the Phase-3 integration baseline through `b5271df` plus root closeout verification.
+
+The integrated framework exposes GraphWorld/render planning, camera/interaction/labels, deterministic layout/LOD, transactions, and drill-down through the public package barrel. The Rust backend opens real worktree/git-dir/linked-worktree/bare repositories and supplies metadata-first snapshots plus lazy bounded diffs. The Tauri shell is runnable and consumes GraphWorld through the public package boundary.
+
+Known Phase-4 integration seams are explicit rather than guessed: `GitRepositorySnapshot.head` currently carries the resolved HEAD object ID in the Rust backend; a symbolic HEAD ref needs a separate field if the UI requires both identities. Repository `revision` is a structural snapshot fingerprint for refresh invalidation, not yet a sufficient destructive-mutation freshness token because index/worktree state and hook contents are outside that fingerprint. The watcher core is deterministic/coalescing but still needs a native filesystem event adapter.
+
 ### Worker A — graph-elements rendering core
 
 Owns `packages/graph-elements/src/{world,nodes,edges,rendering}` and package setup/tests. Implements generic scene/world composition, procedural descriptors to geometry, edge styles, lighting, and renderer planning/instancing.
@@ -53,6 +59,8 @@ Owns `apps/gitinspect`. Builds Vite/React/Tauri shell, typed adapter around IPC 
 Each worker updates `CHANGELOG.md` only by posting a coordination note to the architect initially, to avoid a shared-file conflict. The architect consolidates changelog entries between integration commits.
 
 ## Phase 4 — Git visual mapping and end-to-end world
+
+Status: **ready to dispatch** from the integrated Phase-3 baseline.
 
 After Phase-3 contracts settle:
 
