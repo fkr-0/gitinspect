@@ -12,7 +12,7 @@ This document defines the reproducible Phase-5 scale evidence for the native rep
 - whole-command user CPU, system CPU, elapsed wall time, and maximum RSS with `/usr/bin/time -v`;
 - the existing app-local search/index/LOD benchmark for bounded index/search behavior.
 
-The native refresh API currently rebuilds a complete snapshot after a coalesced filesystem change. The “changed refresh” number therefore measures the implemented full-refresh seam, not an incremental/delta algorithm.
+The legacy native refresh API rebuilds a complete snapshot after a coalesced filesystem change. Phase 2 adds an opt-in compact Tauri transport whose refresh path first recomputes the existing revision-defining HEAD/ref/remote/hook metadata. An unchanged revision returns only an `unchanged` status plus the revision and skips the commit walk; a changed revision still falls back to the complete metadata-only snapshot. This is a revision-aware unchanged cache, not a general commit delta algorithm.
 
 ## Reproduction
 
@@ -28,6 +28,12 @@ The executable emits one JSON object on stdout. GNU time writes CPU/RSS evidence
 For app-local index/search/LOD instrumentation:
 
     pnpm --filter @gitinspect/app exec vitest run src/scale/benchmark.test.ts
+
+For the isolated compact-transport/RSS path (same deterministic fixtures, without allocating the legacy JSON envelope in the same process):
+
+    crates/gitinspect-core/target/release/examples/scale_bench 1000 --compact-only
+    crates/gitinspect-core/target/release/examples/scale_bench 10000 --compact-only
+    crates/gitinspect-core/target/release/examples/scale_bench 100000 --compact-only
 
 ## Invariants
 
@@ -53,6 +59,24 @@ The 100k IPC envelope is about 34.51 MiB and payload density stays near 362 byte
 
 Repeated 100k fixture generation produced the same initial HEAD `2c71fd5946a3ceefb54e1a8ace408311772fbedc` and revision `sha256:5e66654451511104676a31a41c90802758c1e50ee86246adc51104b681787cfc`; the regression suite independently compares two deterministic generated histories.
 
+### Phase 2 compact transport + revision-aware unchanged refresh
+
+Phase 2 keeps `GitRepositorySnapshot` as the public application contract and keeps the legacy `open_repository` / `refresh_repository` Tauri commands registered. The native app bridge opts into additive `open_repository_compact` / `refresh_repository_compact` commands. Compact commit metadata is encoded as positional tuples plus a snapshot-local string table; refs/remotes/hooks retain their existing records. The decoder reconstructs the exact public snapshot shape. Compact encoding rejects any snapshot containing eager commit file lists, so commit diff/blob detail remains on the existing separately bounded lazy IPC path.
+
+Qualified on 2026-08-23 from Phase-2 working state based on commit `325fcb1`. The release benchmark was rerun after the implementation, and the 100k deterministic HEAD/revision exactly matched Phase 1.
+
+| commits | compact conversion | compact JSON | compact IPC payload | bytes/commit | legacy payload | payload reduction | unchanged revision check | compact process HWM |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 0.36 ms | 0.11 ms | 121,913 B | 121.9 B | 360,430 B | 66.2% | 0.23 ms | 7.05 MiB |
+| 10,000 | 4.29 ms | 0.99 ms | 1,252,919 B | 125.3 B | 3,609,432 B | 65.3% | 0.30 ms | 14.02 MiB |
+| 100,000 | 51.07 ms | 9.26 ms | 12,922,925 B (~12.32 MiB) | 129.2 B | 36,189,434 B (~34.51 MiB) | 64.3% | 0.38 ms | 86.13 MiB |
+
+The same post-change 100k legacy comparison produced 36,189,434 B, ~662.79 ms unchanged full refresh, and 130.19 MiB process HWM. The compact run therefore cuts the 100k serialized session by ~64.3% (2.80× smaller), cuts process HWM by ~33.8% in the same qualification rerun (86.13 vs 130.19 MiB; ~34.4% versus the original Phase-1 131.27 MiB HWM), and reduces unchanged refresh validation from ~662.79 ms to ~0.38 ms (>1,700× on this run). Snapshot construction itself remains intentionally unchanged: compact 100k cold open was ~665.94 ms versus ~654.96 ms in the comparison rerun.
+
+Compact encoding is not free: the 100k native conversion plus compact serialization cost ~60.33 ms versus ~34.69 ms to serialize the legacy session. The trade is an additional ~25.6 ms of native encoding work for a ~22.17 MiB smaller IPC document and lower transport-side peak memory. Actual WebView IPC/JSON parse transfer time is not claimed by this benchmark.
+
+The changed-revision path is deliberately conservative. A +1 commit still performs the existing O(N) metadata walk before compact encoding; the post-change legacy comparison measured ~658.96 ms for that full rebuild. Phase 2 does **not** claim an incremental +1 refresh win. A future append-aware delta/cache stage would need an explicit ancestry/cursor contract and deterministic divergence handling before replacing that fallback.
+
 ### App-local search/index/LOD
 
 The existing deterministic app benchmark was rerun in the same checkout. Its memory accounting for `GitSearchIndex` is conservative index-owned accounting, while the GNU-time process HWM includes Vitest, V8, all three generated datasets, layout/search work, and runner overhead.
@@ -67,11 +91,11 @@ The 100k bounded fuzzy probe took 20.41 ms, stopped at exactly 16,384 token comp
 
 ### Current evidence bounds
 
-The present implementation qualifies on this host with these evidence bounds: metadata-only native snapshot open and one-change refresh below 1 s at 100k; native IPC envelope below 40 MiB at 100k; native benchmark max RSS below 160 MiB at 100k; app cold index and scale projection below 1 s at 100k; fuzzy work bounded by configured document/token ceilings. Structural regression tests avoid fragile machine-specific timing assertions but pin deterministic history identity, metadata-only loading, unchanged-refresh equivalence, and a 512 kB maximum payload for the 1k fixture.
+The present implementation qualifies on this host with these evidence bounds: metadata-only native snapshot open and one-change fallback refresh below 1 s at 100k; active compact native IPC envelope below 13 MiB at 100k while the preserved legacy envelope remains ~34.51 MiB; isolated compact process HWM below 90 MiB at 100k; unchanged revision validation below 1 ms on the qualification fixture; app cold index and scale projection below 1 s at 100k; fuzzy work bounded by configured document/token ceilings. Structural regression tests avoid fragile machine-specific timing assertions but pin deterministic history identity, metadata-only loading, exact compact round-trip, compact payload less than half the legacy 1k JSON, unchanged revision short-circuiting, and the original 512 kB maximum legacy payload for the 1k fixture.
 
 ## Actionability rules
 
-1. Do not raise the product snapshot limit from its current default solely because the core can walk 100k commits. Tauri open/refresh currently use `OpenOptions::default()` (`max_commits=50_000`), and payload/latency evidence must justify any product-limit change.
-2. If JSON payload growth becomes operationally large, prefer a bounded/paged or compact snapshot transport over eager diff/blob hydration.
-3. If unchanged/+1 refresh remains close to cold-open cost, the measured bottleneck justifies a future revision-aware delta/cache seam; do not call the present full refresh “incremental.”
+1. Do not raise the product snapshot limit from its current default solely because the core can walk 100k commits. Tauri compact open/refresh still use `OpenOptions::default()` (`max_commits=50_000`), and this stage intentionally does not change that product bound.
+2. Keep the compact transport metadata-only. Eager diff/blob hydration is explicitly rejected by the encoder; deeper inspection stays on the separately bounded lazy commit-diff path.
+3. Do not call Phase 2 a general incremental refresh. Unchanged revisions short-circuit before the commit walk, but changed revisions intentionally fall back to a complete metadata snapshot. An append-aware or paged delta contract remains a future seam.
 4. Search/index performance belongs to the app-local `GitSearchIndex`. Its current 100k evidence includes conservative owned-byte accounting and explicit fuzzy document/token budgets; native Rust snapshot timing is a separate layer.

@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gitinspect_core::{
-    ChangeReason, CommitDiff, DiffOptions, GitRepositorySnapshot, OpenOptions, RepositoryHandle,
-    RepositoryService, WatchOptions,
+    ChangeReason, CommitDiff, CompactGitRepositorySnapshot, DiffOptions, GitRepositorySnapshot,
+    OpenOptions, RepositoryHandle, RepositoryService, WatchOptions,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -16,6 +16,24 @@ pub struct RepositoryPathSelection {
     pub mode: RepositoryPathSelectionMode,
     #[allow(dead_code)]
     pub expected_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactRepositorySession {
+    pub key: String,
+    pub snapshot: CompactGitRepositorySnapshot,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "status", rename_all = "kebab-case")]
+pub enum CompactRepositoryRefresh {
+    Unchanged {
+        revision: String,
+    },
+    Changed {
+        session: Box<CompactRepositorySession>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -94,6 +112,16 @@ impl RepositoryAuthority {
         Ok(RepositorySession { key, snapshot })
     }
 
+    pub fn open_compact(&self, path: &str) -> Result<CompactRepositorySession, String> {
+        let session = self.open(path)?;
+        let compact = CompactGitRepositorySnapshot::from_snapshot(&session.snapshot)
+            .map_err(|error| error.to_string())?;
+        Ok(CompactRepositorySession {
+            key: session.key,
+            snapshot: compact,
+        })
+    }
+
     pub fn refresh(
         &self,
         repository_id: &str,
@@ -130,6 +158,57 @@ impl RepositoryAuthority {
         Ok(RepositorySession {
             key: repository_id.to_owned(),
             snapshot,
+        })
+    }
+
+    pub fn refresh_compact(
+        &self,
+        repository_id: &str,
+        expected_revision: Option<&str>,
+    ) -> Result<CompactRepositoryRefresh, String> {
+        let entry = self
+            .lock_repositories()?
+            .get(repository_id)
+            .cloned()
+            .ok_or_else(|| format!("unknown repository handle: {repository_id}"))?;
+        let observed_revision = entry.revision.clone();
+        if let Some(expected) = expected_revision
+            && expected != observed_revision
+        {
+            return Err(format!(
+                "stale repository revision: expected {expected}, current {observed_revision}"
+            ));
+        }
+
+        let snapshot = entry
+            .handle
+            .refresh_if_changed(&observed_revision, OpenOptions::default())
+            .map_err(|error| error.to_string())?;
+
+        let mut repositories = self.lock_repositories()?;
+        let current = repositories
+            .get_mut(repository_id)
+            .ok_or_else(|| format!("unknown repository handle: {repository_id}"))?;
+        if current.revision != observed_revision {
+            return Err(format!(
+                "stale repository refresh: observed {observed_revision}, current {}",
+                current.revision
+            ));
+        }
+
+        let Some(snapshot) = snapshot else {
+            return Ok(CompactRepositoryRefresh::Unchanged {
+                revision: observed_revision,
+            });
+        };
+        let compact = CompactGitRepositorySnapshot::from_snapshot(&snapshot)
+            .map_err(|error| error.to_string())?;
+        current.revision = snapshot.revision;
+        Ok(CompactRepositoryRefresh::Changed {
+            session: Box::new(CompactRepositorySession {
+                key: repository_id.to_owned(),
+                snapshot: compact,
+            }),
         })
     }
 
@@ -186,6 +265,14 @@ pub fn open_repository(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn open_repository_compact(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<CompactRepositorySession, String> {
+    state.authority.open_compact(&path)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn refresh_repository(
     repository_id: String,
     expected_revision: Option<String>,
@@ -194,6 +281,17 @@ pub fn refresh_repository(
     state
         .authority
         .refresh(&repository_id, expected_revision.as_deref())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn refresh_repository_compact(
+    repository_id: String,
+    expected_revision: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<CompactRepositoryRefresh, String> {
+    state
+        .authority
+        .refresh_compact(&repository_id, expected_revision.as_deref())
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -403,5 +501,58 @@ mod tests {
         assert_eq!(diff.oid, second_oid);
         assert_eq!(diff.files.len(), 1);
         assert_eq!(diff.files[0].path, "one.txt");
+    }
+
+    #[test]
+    fn compact_authority_round_trips_and_short_circuits_unchanged_refresh() {
+        let fixture = Fixture::new();
+        let first_oid = fixture.commit("one.txt", "one\n", "one");
+        let authority = RepositoryAuthority::default();
+        let opened = authority
+            .open_compact(fixture.path.to_str().unwrap())
+            .unwrap();
+        let expanded = opened.snapshot.expand().unwrap();
+
+        assert_eq!(expanded.head.as_deref(), Some(first_oid.as_str()));
+        assert!(
+            expanded
+                .commits
+                .iter()
+                .all(|commit| commit.files.is_empty())
+        );
+        let previous_revision = expanded.revision.clone();
+
+        match authority
+            .refresh_compact(&opened.key, Some(&previous_revision))
+            .unwrap()
+        {
+            CompactRepositoryRefresh::Unchanged { revision } => {
+                assert_eq!(revision, previous_revision);
+            }
+            CompactRepositoryRefresh::Changed { .. } => {
+                panic!("unchanged repository unexpectedly returned a snapshot")
+            }
+        }
+
+        let second_oid = fixture.commit("one.txt", "one\ntwo\n", "two");
+        match authority
+            .refresh_compact(&opened.key, Some(&previous_revision))
+            .unwrap()
+        {
+            CompactRepositoryRefresh::Changed { session } => {
+                let snapshot = session.snapshot.expand().unwrap();
+                assert_eq!(snapshot.head.as_deref(), Some(second_oid.as_str()));
+                assert_ne!(snapshot.revision, previous_revision);
+                assert!(
+                    snapshot
+                        .commits
+                        .iter()
+                        .all(|commit| commit.files.is_empty())
+                );
+            }
+            CompactRepositoryRefresh::Unchanged { .. } => {
+                panic!("changed repository failed to return a new snapshot")
+            }
+        }
     }
 }

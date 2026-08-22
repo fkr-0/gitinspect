@@ -1,7 +1,56 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { GitRepositorySnapshot } from "@gitinspect/contracts";
 
+import type {
+  CompactGitCommitRecord,
+  CompactGitRepositorySnapshot,
+} from "./compactRepository";
 import { createDemoSnapshot } from "./repository";
 import { createTauriRepositoryService } from "./tauriRepository";
+
+function compactSnapshot(snapshot: GitRepositorySnapshot): CompactGitRepositorySnapshot {
+  const strings: string[] = [];
+  const indices = new Map<string, number>();
+  const intern = (value: string): number => {
+    const existing = indices.get(value);
+    if (existing !== undefined) return existing;
+    const index = strings.length;
+    strings.push(value);
+    indices.set(value, index);
+    return index;
+  };
+  const signatureCodes = {
+    valid: 0,
+    invalid: 1,
+    unknown: 2,
+    unsigned: 3,
+  } as const;
+  const commits: CompactGitCommitRecord[] = snapshot.commits.map((commit) => [
+    intern(commit.oid),
+    intern(commit.treeOid),
+    commit.parents.map(intern),
+    intern(commit.authorName),
+    commit.authorEmail === undefined ? null : intern(commit.authorEmail),
+    commit.authoredAtMs,
+    commit.committedAtMs,
+    intern(commit.message),
+    signatureCodes[commit.signatureStatus],
+  ]);
+  return {
+    schemaVersion: 1,
+    repositoryPath: snapshot.repositoryPath,
+    gitDir: snapshot.gitDir,
+    ...(snapshot.head === undefined ? {} : { head: snapshot.head }),
+    ...(snapshot.headRef === undefined ? {} : { headRef: snapshot.headRef }),
+    revision: snapshot.revision,
+    strings,
+    commits,
+    refs: snapshot.refs,
+    remotes: snapshot.remotes,
+    hooks: snapshot.hooks,
+    truncated: snapshot.truncated,
+  };
+}
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -10,7 +59,7 @@ afterEach(() => {
 describe("Tauri repository bridge", () => {
   it("maps repository operations onto the narrow native command/event contract", async () => {
     const snapshot = createDemoSnapshot("/native/repo");
-    const session = { key: "repository:1", snapshot };
+    const compact = { key: "repository:1", snapshot: compactSnapshot(snapshot) };
     const invocations: Array<{ command: string; args: unknown }> = [];
     let eventHandler: ((event: { event: string; id: number; payload: unknown }) => void) | undefined;
     const unlisten = vi.fn();
@@ -22,8 +71,11 @@ describe("Tauri repository bridge", () => {
             invocations.push({ command, args });
             switch (command) {
               case "choose_repository_path": return "/native/repo";
-              case "open_repository": return session;
-              case "refresh_repository": return session;
+              case "open_repository_compact": return compact;
+              case "refresh_repository_compact": return {
+                status: "unchanged",
+                revision: snapshot.revision,
+              };
               case "get_commit_diff": return {
                 oid: snapshot.commits[0]!.oid,
                 files: snapshot.commits[0]!.files,
@@ -50,7 +102,9 @@ describe("Tauri repository bridge", () => {
       "/native/repo",
     );
     const opened = await service!.openRepository("/native/repo");
-    await service!.refreshRepository(opened);
+    const refreshed = await service!.refreshRepository(opened);
+    expect(refreshed).toBe(opened);
+    expect(opened.snapshot.commits.every((commit) => commit.files.length === 0)).toBe(true);
     const diff = await service!.getCommitDiff(opened, snapshot.commits[0]!.oid);
     expect(diff.oid).toBe(snapshot.commits[0]!.oid);
 
@@ -77,8 +131,12 @@ describe("Tauri repository bridge", () => {
     await stop();
     expect(unlisten).toHaveBeenCalledTimes(1);
     expect(invocations).toContainEqual({
-      command: "refresh_repository",
+      command: "refresh_repository_compact",
       args: { repositoryId: opened.key, expectedRevision: snapshot.revision },
+    });
+    expect(invocations).toContainEqual({
+      command: "open_repository_compact",
+      args: { path: "/native/repo" },
     });
     expect(invocations).toContainEqual({
       command: "get_commit_diff",

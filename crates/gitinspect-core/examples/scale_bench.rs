@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use gitinspect_core::{GitRepositorySnapshot, OpenOptions, RepositoryService};
+use gitinspect_core::{
+    CompactGitRepositorySnapshot, GitRepositorySnapshot, OpenOptions, RepositoryService,
+};
 use serde::Serialize;
 
 const BASE_TIMESTAMP: i64 = 1_700_000_000;
@@ -15,6 +17,51 @@ const FIXTURE_CONTENT: &str = "synthetic scale fixture\n";
 struct RepositorySessionPayload<'a> {
     key: &'a str,
     snapshot: &'a GitRepositorySnapshot,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompactScaleBenchResult {
+    mode: &'static str,
+    commits_requested: usize,
+    commits_loaded: usize,
+    fixture_generation_ms: f64,
+    snapshot_open_ms: f64,
+    compact_conversion_ms: f64,
+    compact_serialization_ms: f64,
+    compact_ipc_session_json_bytes: usize,
+    compact_payload_bytes_per_commit: f64,
+    unchanged_revision_check_ms: f64,
+    all_commit_files_lazy: bool,
+    snapshot_truncated: bool,
+    deterministic_head: String,
+    revision: String,
+    snapshot_rss_bytes: Option<u64>,
+    compact_conversion_rss_bytes: Option<u64>,
+    compact_rss_bytes: Option<u64>,
+    compact_ipc_rss_bytes: Option<u64>,
+    peak_rss_bytes: Option<u64>,
+    fixture_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum BenchResult {
+    Legacy(ScaleBenchResult),
+    Compact(CompactScaleBenchResult),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BenchMode {
+    Legacy,
+    Compact,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompactRepositorySessionPayload<'a> {
+    key: &'a str,
+    snapshot: &'a CompactGitRepositorySnapshot,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,21 +94,26 @@ fn elapsed_ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1_000.0
 }
 
-fn parse_commit_count() -> Result<usize, String> {
+fn parse_args() -> Result<(usize, BenchMode), String> {
     let mut args = std::env::args().skip(1);
     let raw = args
         .next()
-        .ok_or_else(|| "usage: scale_bench <commit-count>".to_owned())?;
-    if args.next().is_some() {
-        return Err("scale_bench accepts exactly one commit-count argument".to_owned());
-    }
+        .ok_or_else(|| "usage: scale_bench <commit-count> [--compact-only]".to_owned())?;
     let count = raw
         .parse::<usize>()
         .map_err(|error| format!("invalid commit count {raw:?}: {error}"))?;
     if count == 0 || count > 1_000_000 {
         return Err("commit count must be between 1 and 1,000,000".to_owned());
     }
-    Ok(count)
+    let mode = match args.next().as_deref() {
+        None => BenchMode::Legacy,
+        Some("--compact-only") => BenchMode::Compact,
+        Some(other) => return Err(format!("unsupported scale_bench argument: {other}")),
+    };
+    if args.next().is_some() {
+        return Err("scale_bench accepts at most one mode flag".to_owned());
+    }
+    Ok((count, mode))
 }
 
 fn fixture_path(commit_count: usize) -> PathBuf {
@@ -221,8 +273,7 @@ fn proc_memory_bytes(field: &str) -> Option<u64> {
     Some(kib.saturating_mul(1024))
 }
 
-fn run() -> Result<ScaleBenchResult, String> {
-    let commits_requested = parse_commit_count()?;
+fn run_legacy(commits_requested: usize) -> Result<ScaleBenchResult, String> {
     let fixture_path = fixture_path(commits_requested);
 
     let generation_started = Instant::now();
@@ -326,8 +377,105 @@ fn run() -> Result<ScaleBenchResult, String> {
     })
 }
 
+fn run_compact(commits_requested: usize) -> Result<CompactScaleBenchResult, String> {
+    let fixture_path = fixture_path(commits_requested);
+
+    let generation_started = Instant::now();
+    generate_fixture(&fixture_path, commits_requested)?;
+    let fixture_generation_ms = elapsed_ms(generation_started.elapsed());
+
+    let options = OpenOptions {
+        max_commits: commits_requested + 1,
+        include_commit_files: false,
+        ..OpenOptions::default()
+    };
+    let snapshot_started = Instant::now();
+    let (handle, snapshot) = RepositoryService::open(&fixture_path, options.clone())
+        .map_err(|error| error.to_string())?;
+    let snapshot_open_ms = elapsed_ms(snapshot_started.elapsed());
+    if snapshot.commits.len() != commits_requested {
+        return Err(format!(
+            "fixture expected {commits_requested} commits, snapshot loaded {}",
+            snapshot.commits.len()
+        ));
+    }
+    let all_commit_files_lazy = snapshot
+        .commits
+        .iter()
+        .all(|commit| commit.files.is_empty());
+    if !all_commit_files_lazy {
+        return Err("metadata-only snapshot eagerly materialized commit files".to_owned());
+    }
+
+    let commits_loaded = snapshot.commits.len();
+    let snapshot_truncated = snapshot.truncated;
+    let deterministic_head = snapshot
+        .head
+        .clone()
+        .ok_or_else(|| "generated fixture has no HEAD".to_owned())?;
+    let revision = snapshot.revision.clone();
+    let snapshot_rss_bytes = proc_memory_bytes("VmRSS:");
+
+    let compact_started = Instant::now();
+    let compact = CompactGitRepositorySnapshot::from_snapshot(&snapshot)
+        .map_err(|error| error.to_string())?;
+    let compact_conversion_ms = elapsed_ms(compact_started.elapsed());
+    let compact_conversion_rss_bytes = proc_memory_bytes("VmRSS:");
+    drop(snapshot);
+    let compact_rss_bytes = proc_memory_bytes("VmRSS:");
+
+    let serialization_started = Instant::now();
+    let compact_payload = serde_json::to_vec(&CompactRepositorySessionPayload {
+        key: "repository:1",
+        snapshot: &compact,
+    })
+    .map_err(|error| error.to_string())?;
+    let compact_serialization_ms = elapsed_ms(serialization_started.elapsed());
+    let compact_ipc_session_json_bytes = compact_payload.len();
+    let compact_ipc_rss_bytes = proc_memory_bytes("VmRSS:");
+    drop(compact_payload);
+    drop(compact);
+
+    let unchanged_started = Instant::now();
+    let unchanged = handle
+        .refresh_if_changed(&revision, options)
+        .map_err(|error| error.to_string())?;
+    let unchanged_revision_check_ms = elapsed_ms(unchanged_started.elapsed());
+    if unchanged.is_some() {
+        return Err("unchanged revision-aware refresh rebuilt a snapshot".to_owned());
+    }
+
+    Ok(CompactScaleBenchResult {
+        mode: "compact-only",
+        commits_requested,
+        commits_loaded,
+        fixture_generation_ms,
+        snapshot_open_ms,
+        compact_conversion_ms,
+        compact_serialization_ms,
+        compact_ipc_session_json_bytes,
+        compact_payload_bytes_per_commit: compact_ipc_session_json_bytes as f64
+            / commits_requested as f64,
+        unchanged_revision_check_ms,
+        all_commit_files_lazy,
+        snapshot_truncated,
+        deterministic_head,
+        revision,
+        snapshot_rss_bytes,
+        compact_conversion_rss_bytes,
+        compact_rss_bytes,
+        compact_ipc_rss_bytes,
+        peak_rss_bytes: proc_memory_bytes("VmHWM:"),
+        fixture_path: fixture_path.to_string_lossy().into_owned(),
+    })
+}
+
 fn main() {
-    match run() {
+    let result = parse_args().and_then(|(commits, mode)| match mode {
+        BenchMode::Legacy => run_legacy(commits).map(BenchResult::Legacy),
+        BenchMode::Compact => run_compact(commits).map(BenchResult::Compact),
+    });
+    match result {
         Ok(result) => println!(
             "{}",
             serde_json::to_string(&result).expect("serialize result")

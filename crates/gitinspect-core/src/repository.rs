@@ -83,6 +83,20 @@ impl RepositoryHandle {
         snapshot_from_repo(&repo, &options)
     }
 
+    /// Recompute only the revision-defining repository metadata first and skip
+    /// the commit walk when it still matches `current_revision`.
+    ///
+    /// `None` means the authoritative snapshot revision is unchanged. `Some`
+    /// contains the same full metadata-only snapshot returned by `refresh()`.
+    pub fn refresh_if_changed(
+        &self,
+        current_revision: &str,
+        options: OpenOptions,
+    ) -> Result<Option<GitRepositorySnapshot>, Error> {
+        let repo = gix::open(&self.git_dir).map_err(Error::git)?;
+        snapshot_from_repo_if_changed(&repo, &options, current_revision)
+    }
+
     pub fn commit_diff(
         &self,
         oid: impl AsRef<str>,
@@ -172,6 +186,35 @@ fn snapshot_from_repo(
     repo: &gix::Repository,
     options: &OpenOptions,
 ) -> Result<GitRepositorySnapshot, Error> {
+    let metadata = snapshot_metadata_from_repo(repo)?;
+    snapshot_from_metadata(repo, options, metadata)
+}
+
+fn snapshot_from_repo_if_changed(
+    repo: &gix::Repository,
+    options: &OpenOptions,
+    current_revision: &str,
+) -> Result<Option<GitRepositorySnapshot>, Error> {
+    let metadata = snapshot_metadata_from_repo(repo)?;
+    if metadata.revision == current_revision {
+        return Ok(None);
+    }
+    snapshot_from_metadata(repo, options, metadata).map(Some)
+}
+
+#[derive(Debug)]
+struct SnapshotMetadata {
+    repository_path: String,
+    git_dir: String,
+    head: Option<String>,
+    head_ref: Option<String>,
+    revision: String,
+    refs: Vec<GitRefRecord>,
+    remotes: Vec<GitRemoteRecord>,
+    hooks: Vec<String>,
+}
+
+fn snapshot_metadata_from_repo(repo: &gix::Repository) -> Result<SnapshotMetadata, Error> {
     let repository_path = canonical_repository_path(repo)?;
     let git_dir = canonicalize(repo.git_dir())?;
     let head = repo.head_id().ok().map(|id| id.to_string());
@@ -186,8 +229,6 @@ fn snapshot_from_repo(
 
     refs.sort_by(|a, b| a.name.cmp(&b.name));
     remotes.sort_by(|a, b| a.name.cmp(&b.name));
-    let (commits, truncated) = collect_commits(repo, options, &refs)?;
-
     let revision = revision_fingerprint(
         head.as_deref(),
         head_ref.as_deref(),
@@ -195,17 +236,35 @@ fn snapshot_from_repo(
         &remotes,
         &hooks,
     );
-    Ok(GitRepositorySnapshot {
-        schema_version: 1,
+    Ok(SnapshotMetadata {
         repository_path: path_to_string(&repository_path),
         git_dir: path_to_string(&git_dir),
         head,
         head_ref,
         revision,
-        commits,
         refs,
         remotes,
         hooks,
+    })
+}
+
+fn snapshot_from_metadata(
+    repo: &gix::Repository,
+    options: &OpenOptions,
+    metadata: SnapshotMetadata,
+) -> Result<GitRepositorySnapshot, Error> {
+    let (commits, truncated) = collect_commits(repo, options, &metadata.refs)?;
+    Ok(GitRepositorySnapshot {
+        schema_version: 1,
+        repository_path: metadata.repository_path,
+        git_dir: metadata.git_dir,
+        head: metadata.head,
+        head_ref: metadata.head_ref,
+        revision: metadata.revision,
+        commits,
+        refs: metadata.refs,
+        remotes: metadata.remotes,
+        hooks: metadata.hooks,
         truncated,
     })
 }

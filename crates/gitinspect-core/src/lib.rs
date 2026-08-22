@@ -6,11 +6,13 @@
 //! in this phase: signed commits are reported as `unknown`, unsigned commits as
 //! `unsigned`.
 
+mod compact;
 mod diff;
 mod model;
 mod repository;
 mod watch;
 
+pub use compact::{CompactGitCommitRecord, CompactGitRepositorySnapshot, CompactSnapshotError};
 pub use model::*;
 pub use repository::{Error, RepositoryHandle, RepositoryService};
 pub use watch::{

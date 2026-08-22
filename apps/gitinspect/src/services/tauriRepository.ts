@@ -1,6 +1,11 @@
 import type { GitCommitDiff } from "@gitinspect/contracts";
 
 import {
+  decodeCompactRepositorySession,
+  type CompactRepositoryRefreshResult,
+  type CompactRepositorySession,
+} from "./compactRepository";
+import {
   NativeRepositoryService,
   type RepositoryChange,
   type RepositoryPathSelection,
@@ -54,14 +59,28 @@ export function createTauriRepositoryService(): RepositoryService | undefined {
     },
 
     openRepository(path: string): Promise<RepositorySession> {
-      return tauri.core.invoke<RepositorySession>("open_repository", { path });
+      return tauri.core
+        .invoke<CompactRepositorySession>("open_repository_compact", { path })
+        .then(decodeCompactRepositorySession);
     },
 
-    refreshRepository(session: RepositorySession): Promise<RepositorySession> {
-      return tauri.core.invoke<RepositorySession>("refresh_repository", {
-        repositoryId: session.key,
-        expectedRevision: session.snapshot.revision,
-      });
+    async refreshRepository(session: RepositorySession): Promise<RepositorySession> {
+      const result = await tauri.core.invoke<CompactRepositoryRefreshResult>(
+        "refresh_repository_compact",
+        {
+          repositoryId: session.key,
+          expectedRevision: session.snapshot.revision,
+        },
+      );
+      if (result.status === "unchanged") {
+        if (result.revision !== session.snapshot.revision) {
+          throw new Error(
+            `Native unchanged refresh revision mismatch: ${result.revision} != ${session.snapshot.revision}`,
+          );
+        }
+        return session;
+      }
+      return decodeCompactRepositorySession(result.session);
     },
 
     getCommitDiff(session: RepositorySession, oid: string): Promise<GitCommitDiff> {
