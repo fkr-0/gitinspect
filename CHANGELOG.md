@@ -10,4 +10,5 @@
 - Parallel implementation plan and worker orchestration contract.
 - Shared graph-elements package scaffold and autonomous Phase-3 worker prompts.
 - Continuous-integration workflow for TypeScript packages and Rust backend/application crates.
+- Deferred Phase-4 worker contracts for Git semantic graph construction, procedural visual mapping, real IPC/inspection/live reload, and end-to-end integration.
 
