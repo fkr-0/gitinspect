@@ -1,4 +1,5 @@
 import type {
+  GitCommitDiff,
   GitCommitRecord,
   GitRepositorySnapshot,
 } from "@gitinspect/contracts";
@@ -16,11 +17,24 @@ export interface RepositorySession {
   readonly snapshot: GitRepositorySnapshot;
 }
 
+export interface RepositoryChange {
+  readonly repositoryId: string;
+  readonly previousRevision: string;
+  readonly reasons: readonly string[];
+}
+
+export type RepositoryWatchStop = () => Promise<void>;
+
 export interface RepositoryService {
   readonly mode: "demo" | "native";
   chooseRepositoryPath(selection: RepositoryPathSelection): Promise<string | undefined>;
   openRepository(path: string): Promise<RepositorySession>;
   refreshRepository(session: RepositorySession): Promise<RepositorySession>;
+  getCommitDiff(session: RepositorySession, oid: string): Promise<GitCommitDiff>;
+  watchRepository(
+    session: RepositorySession,
+    onChange: (change: RepositoryChange) => void,
+  ): Promise<RepositoryWatchStop>;
 }
 
 const commits: readonly GitCommitRecord[] = [
@@ -175,7 +189,8 @@ export function createDemoSnapshot(path: string): GitRepositorySnapshot {
     schemaVersion: 1,
     repositoryPath,
     gitDir: `${repositoryPath}${suffix}.git`,
-    head: "refs/heads/main",
+    ...(commits[0] ? { head: commits[0].oid } : {}),
+    headRef: "refs/heads/main",
     revision: `demo-${stableHash(repositoryPath)}`,
     commits,
     refs: [
@@ -219,6 +234,11 @@ export interface NativeRepositoryBridge {
   chooseRepositoryPath(selection: RepositoryPathSelection): Promise<string | undefined>;
   openRepository(path: string): Promise<RepositorySession>;
   refreshRepository(session: RepositorySession): Promise<RepositorySession>;
+  getCommitDiff(session: RepositorySession, oid: string): Promise<GitCommitDiff>;
+  watchRepository(
+    session: RepositorySession,
+    onChange: (change: RepositoryChange) => void,
+  ): Promise<RepositoryWatchStop>;
 }
 
 export class NativeRepositoryService implements RepositoryService {
@@ -236,6 +256,17 @@ export class NativeRepositoryService implements RepositoryService {
 
   refreshRepository(session: RepositorySession): Promise<RepositorySession> {
     return this.bridge.refreshRepository(session);
+  }
+
+  getCommitDiff(session: RepositorySession, oid: string): Promise<GitCommitDiff> {
+    return this.bridge.getCommitDiff(session, oid);
+  }
+
+  watchRepository(
+    session: RepositorySession,
+    onChange: (change: RepositoryChange) => void,
+  ): Promise<RepositoryWatchStop> {
+    return this.bridge.watchRepository(session, onChange);
   }
 }
 
@@ -256,6 +287,24 @@ export class DemoRepositoryService implements RepositoryService {
 
   async refreshRepository(session: RepositorySession): Promise<RepositorySession> {
     return this.openRepository(session.snapshot.repositoryPath);
+  }
+
+  async getCommitDiff(session: RepositorySession, oid: string): Promise<GitCommitDiff> {
+    const commit = session.snapshot.commits.find((candidate) => candidate.oid === oid);
+    if (!commit) throw new Error(`Unknown demo commit: ${oid}`);
+    return {
+      oid,
+      ...(commit.parents[0] ? { parentOid: commit.parents[0] } : {}),
+      files: commit.files,
+      truncated: false,
+    };
+  }
+
+  async watchRepository(
+    _session: RepositorySession,
+    _onChange: (change: RepositoryChange) => void,
+  ): Promise<RepositoryWatchStop> {
+    return async () => undefined;
   }
 }
 

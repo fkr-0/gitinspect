@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useReducer } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import type { GitCommitDiff } from "@gitinspect/contracts";
 import type { GraphNodeRecord } from "@gitinspect/graph-elements";
 
 import { GraphViewport } from "./components/GraphViewport";
@@ -13,6 +14,12 @@ interface AppProps {
   readonly repositoryService?: RepositoryService;
   readonly autoOpenDemo?: boolean;
 }
+
+type CommitDiffState =
+  | { readonly status: "idle" }
+  | { readonly status: "loading"; readonly oid: string }
+  | { readonly status: "ready"; readonly oid: string; readonly diff: GitCommitDiff }
+  | { readonly status: "error"; readonly oid: string; readonly message: string };
 
 function shortLabel(node: GraphNodeRecord): string {
   if (node.kind === "commit") {
@@ -33,6 +40,7 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
   const fallbackService = useMemo(() => createDemoRepositoryService(), []);
   const service = repositoryService ?? fallbackService;
   const [state, dispatch] = useReducer(studioReducer, initialStudioState);
+  const [commitDiffState, setCommitDiffState] = useState<CommitDiffState>({ status: "idle" });
 
   const openRepository = useCallback(
     async (path: string) => {
@@ -63,6 +71,89 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
   const selectedNode = state.dataset?.nodes.find(
     (node) => node.id === state.selectedElementId,
   );
+  const selectedCommitOid = selectedNode?.kind === "commit" && typeof selectedNode.properties.oid === "string"
+    ? selectedNode.properties.oid
+    : undefined;
+
+  useEffect(() => {
+    const session = state.session;
+    if (!session) return;
+    let active = true;
+    let stopWatch: (() => Promise<void>) | undefined;
+    let refreshInFlight = false;
+
+    void service
+      .watchRepository(session, (change) => {
+        if (
+          !active ||
+          refreshInFlight ||
+          change.repositoryId !== session.key ||
+          change.previousRevision !== session.snapshot.revision
+        ) {
+          return;
+        }
+        refreshInFlight = true;
+        void service
+          .refreshRepository(session)
+          .then((refreshed) => {
+            if (!active || refreshed.key !== session.key) return;
+            dispatch({
+              type: "repositoryLoaded",
+              session: refreshed,
+              dataset: repositorySnapshotToGraphDataset(refreshed.snapshot),
+            });
+          })
+          .catch((error: unknown) => {
+            if (!active) return;
+            const message = error instanceof Error ? error.message : String(error);
+            if (!/stale repository (?:revision|refresh)/i.test(message)) {
+              dispatch({ type: "repositoryFailed", message });
+            }
+          })
+          .finally(() => {
+            refreshInFlight = false;
+          });
+      })
+      .then((stop) => {
+        if (active) stopWatch = stop;
+        else void stop();
+      })
+      .catch((error: unknown) => {
+        if (active) console.warn("Repository live refresh is unavailable", error);
+      });
+
+    return () => {
+      active = false;
+      if (stopWatch) void stopWatch();
+    };
+  }, [service, state.session?.key, state.session?.snapshot.revision]);
+
+  useEffect(() => {
+    const session = state.session;
+    if (!session || !selectedCommitOid) {
+      setCommitDiffState({ status: "idle" });
+      return;
+    }
+    let active = true;
+    setCommitDiffState({ status: "loading", oid: selectedCommitOid });
+    void service
+      .getCommitDiff(session, selectedCommitOid)
+      .then((diff) => {
+        if (active) setCommitDiffState({ status: "ready", oid: selectedCommitOid, diff });
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setCommitDiffState({
+          status: "error",
+          oid: selectedCommitOid,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedCommitOid, service, state.session?.key, state.session?.snapshot.revision]);
+
   const searchNeedle = state.search.trim().toLocaleLowerCase();
   const visibleNodes = (state.dataset?.nodes ?? []).filter((node) => {
     if (!searchNeedle) return true;
@@ -259,9 +350,37 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
                   ))}
                 </dl>
               </section>
+              {selectedCommitOid && (
+                <section data-testid="commit-diff-inspection">
+                  <h2>Lazy commit diff</h2>
+                  {commitDiffState.status === "loading" && commitDiffState.oid === selectedCommitOid && (
+                    <p>Loading bounded file diff metadata…</p>
+                  )}
+                  {commitDiffState.status === "error" && commitDiffState.oid === selectedCommitOid && (
+                    <p role="alert">{commitDiffState.message}</p>
+                  )}
+                  {commitDiffState.status === "ready" && commitDiffState.oid === selectedCommitOid && (
+                    <>
+                      <dl>
+                        <div><dt>Parent</dt><dd>{commitDiffState.diff.parentOid ?? "root commit"}</dd></div>
+                        <div><dt>Files</dt><dd>{commitDiffState.diff.files.length}</dd></div>
+                        <div><dt>Truncated</dt><dd>{commitDiffState.diff.truncated ? "yes" : "no"}</dd></div>
+                      </dl>
+                      <div className="diff-file-list">
+                        {commitDiffState.diff.files.map((file) => (
+                          <div key={`${file.path}:${file.status}`}>
+                            <strong>{file.path}</strong>
+                            <span>{file.status} · +{file.additions} / -{file.deletions} · {file.kind}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </section>
+              )}
               <section className="inspection__future">
-                <span className="eyebrow">Phase 4 seam</span>
-                <p>Lazy diffs, domain actions, and full Git object details attach here without changing the viewport contract.</p>
+                <span className="eyebrow">Phase 4 read-only boundary</span>
+                <p>Repository metadata, bounded diffs, and live refresh are wired. Destructive mutation apply remains deliberately unavailable.</p>
               </section>
             </div>
           ) : (
@@ -285,7 +404,7 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
         <div>
           <span className="eyebrow">Mutation staging</span>
           <strong>No operations staged</strong>
-          <p>Phase 3 keeps mutation UI inert. Preview and apply wiring remain deliberately unavailable.</p>
+          <p>Phase 4 keeps original-repository mutation apply inert. Staging remains a visual placeholder only.</p>
         </div>
         <div className="transaction-tray__pipeline" aria-label="Transaction lifecycle preview">
           {[
@@ -306,7 +425,10 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
 
       <footer className="statusbar">
         <span><i data-state={state.status} /> {state.status}</span>
-        <span>{state.session?.snapshot.head ?? "HEAD unavailable"}</span>
+        <span>
+          {state.session?.snapshot.headRef
+            ?? (state.session?.snapshot.head ? `detached@${state.session.snapshot.head.slice(0, 10)}` : "HEAD unavailable")}
+        </span>
         <span className="statusbar__spacer" />
         <span>{state.cameraMode}</span>
         <span>{state.pointerMode}</span>

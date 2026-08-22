@@ -17,6 +17,8 @@ describe("demo repository adapter", () => {
     expect(first).toEqual(second);
     expect(first.snapshot.schemaVersion).toBe(1);
     expect(first.snapshot.commits.length).toBeGreaterThan(4);
+    expect(first.snapshot.head).toBe(first.snapshot.commits[0]?.oid);
+    expect(first.snapshot.headRef).toBe("refs/heads/main");
     expect(first.snapshot.revision).toMatch(/^demo-[0-9a-f]{8}$/);
   });
 
@@ -27,6 +29,7 @@ describe("demo repository adapter", () => {
   it("keeps native folder/file selection and IPC behind the same service seam", async () => {
     const snapshot = createDemoSnapshot("/native/example");
     let selection: RepositoryPathSelection | undefined;
+    let watched = false;
     const service = new NativeRepositoryService({
       chooseRepositoryPath: async (next) => {
         selection = next;
@@ -34,15 +37,34 @@ describe("demo repository adapter", () => {
       },
       openRepository: async () => ({ key: "native:repository-1", snapshot }),
       refreshRepository: async (session) => session,
+      getCommitDiff: async (_session, oid) => ({
+        oid,
+        files: snapshot.commits[0]?.files ?? [],
+        truncated: false,
+      }),
+      watchRepository: async (_session, onChange) => {
+        watched = true;
+        onChange({
+          repositoryId: "native:repository-1",
+          previousRevision: snapshot.revision,
+          reasons: ["refs"],
+        });
+        return async () => undefined;
+      },
     });
 
     expect(
       await service.chooseRepositoryPath({ mode: "folder", expectedKind: "worktree" }),
     ).toBe("/native/example");
     expect(selection).toEqual({ mode: "folder", expectedKind: "worktree" });
-    expect((await service.openRepository("/native/example")).key).toBe(
-      "native:repository-1",
+    const session = await service.openRepository("/native/example");
+    expect(session.key).toBe("native:repository-1");
+    expect((await service.getCommitDiff(session, snapshot.commits[0]!.oid)).oid).toBe(
+      snapshot.commits[0]!.oid,
     );
+    const stop = await service.watchRepository(session, () => undefined);
+    expect(watched).toBe(true);
+    await stop();
   });
 
   it("adapts the snapshot into a complete generic graph without renderer types", () => {
@@ -54,8 +76,10 @@ describe("demo repository adapter", () => {
       snapshot.commits.length,
     );
     expect(dataset.edges.some((edge) => edge.kind === "merge-parent")).toBe(true);
-    expect(dataset.edges.filter((edge) => edge.kind === "ref-target")).toHaveLength(
-      snapshot.refs.length,
-    );
+    expect(
+      dataset.edges.filter((edge) =>
+        ["ref-target", "tag-target", "stash-base"].includes(edge.kind),
+      ),
+    ).toHaveLength(snapshot.refs.length);
   });
 });
