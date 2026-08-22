@@ -2,69 +2,19 @@ import { useMemo, type CSSProperties } from "react";
 import { Canvas } from "@react-three/fiber";
 import {
   GraphWorld,
-  type DataMapper,
   type GraphDataset,
   type GraphNodeRecord,
-  type Vec3,
 } from "@gitinspect/graph-elements";
+
+import { layoutGitDataset } from "../domain/gitLayout";
+import { gitVisualMapper } from "../domain/gitVisualMapper";
+import { gitEdgeStyleRegistry } from "../domain/gitVisualTheme";
 
 interface GraphViewportProps {
   readonly dataset: GraphDataset | undefined;
   readonly selectedElementId: string | undefined;
   readonly search: string;
   readonly onSelect: (elementId: string) => void;
-}
-
-const genericMapper: DataMapper = {
-  mapNode(node, context) {
-    const position = context.nodePositions.get(node.id) ?? [0, 0, 0];
-    const accent = hashUnit(node.id, 83) > 0.5 ? "#82e6c6" : "#9d9af7";
-    return {
-      nodeId: node.id,
-      elements: [
-        {
-          id: `${node.id}:core`,
-          primitive: "sphere",
-          position,
-          scale: [0.34, 0.34, 0.34],
-          color: accent,
-          emissive: accent,
-          opacity: 0.94,
-          interactionKey: node.id,
-          metadata: { kind: node.kind },
-        },
-      ],
-    };
-  },
-  mapEdge(edge) {
-    return {
-      edgeId: edge.id,
-      style: "solid",
-      color: "#52756f",
-      width: 1,
-      opacity: 0.52,
-      head: edge.directed ? "arrow" : "none",
-    };
-  },
-};
-
-function toWorldPosition(node: GraphNodeRecord, index: number, total: number): Vec3 {
-  const hinted = node.positionHint;
-  if (hinted) {
-    return [
-      hinted[0] + (hashUnit(node.id, 3) - 0.5) * 1.4,
-      hinted[1] * 1.2 - total * 0.3,
-      hinted[2] + (hashUnit(node.id, 17) - 0.5) * 1.8,
-    ];
-  }
-
-  const angle = hashUnit(node.id, 11) * Math.PI * 2;
-  const radius = 4.5 + hashUnit(node.id, 29) * 3.5;
-  return [
-    Math.cos(angle) * radius,
-    (hashUnit(node.id, 47) - 0.5) * Math.max(5, total * 0.6),
-    Math.sin(angle) * radius,
-  ];
 }
 
 interface ViewportPoint {
@@ -115,12 +65,7 @@ export function GraphViewport({
     .map((node, index, nodes) => toViewportPoint(node, index, nodes.length));
   const nodePositions = useMemo(() => {
     if (!dataset) return undefined;
-    return new Map(
-      dataset.nodes.map((node, index, nodes) => [
-        node.id,
-        toWorldPosition(node, index, nodes.length),
-      ] as const),
-    );
+    return new Map(Object.entries(layoutGitDataset(dataset).nodePositions));
   }, [dataset]);
   const canRenderCanvas = typeof window !== "undefined";
 
@@ -134,8 +79,9 @@ export function GraphViewport({
         >
           <GraphWorld
             dataset={dataset}
-            mapper={genericMapper}
+            mapper={gitVisualMapper}
             nodePositions={nodePositions}
+            edgeStyleRegistry={gitEdgeStyleRegistry}
             background={{
               color: "#080b0f",
               fog: { color: "#080b0f", near: 22, far: 80 },
@@ -191,7 +137,7 @@ export function GraphViewport({
         </div>
       )}
 
-      <div className="viewport__boundary-note">Public GraphWorld · app-local generic mapper</div>
+      <div className="viewport__boundary-note">Public GraphWorld · semantic Git layout · procedural Git visual grammar</div>
     </section>
   );
 }
