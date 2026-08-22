@@ -59,7 +59,7 @@ Rust library (and optionally test CLI) responsible for:
 - commit metadata and diff/stat extraction;
 - snapshot revision fingerprinting;
 - file watching and event coalescing;
-- transaction validation, copy preview, and confirmed apply.
+- later transaction validation/copy preview/apply support; Phase 4 remains read-only.
 
 The core must be usable outside Tauri tests.
 
@@ -73,34 +73,30 @@ Tauri IPC uses camelCase JSON matching `@gitinspect/contracts`. Rust structs use
 
 Large content rule: full diffs and blobs are fetched lazily by object/path identity. The initial repository snapshot must stay bounded enough for IPC.
 
-## 4. Initial IPC surface
+## 4. Phase-4 IPC surface
 
-Read-only commands:
+The native surface is deliberately narrow and read-only. Repository paths are chosen explicitly, opened once, and represented in the frontend by opaque Rust-owned repository IDs rather than reusable filesystem authority.
+
+Implemented commands:
 
 ```text
-open_repository(path) -> GitRepositorySnapshot
-refresh_repository(repository_id, expected_revision?) -> GitRepositorySnapshot
-get_commit_diff(repository_id, oid, options) -> CommitDiff
-get_object_details(repository_id, oid) -> ObjectDetails
-start_repository_watch(repository_id) -> watch_id
+choose_repository_path(selection) -> path?
+open_repository(path) -> RepositorySession { key, snapshot }
+refresh_repository(repository_id, expected_revision?) -> RepositorySession
+get_commit_diff(repository_id, oid, options?) -> GitCommitDiff
+start_repository_watch(repository_id) -> WatchSession { watchId }
 stop_repository_watch(watch_id) -> void
 ```
 
-Events:
+Implemented event:
 
 ```text
-repository://changed { repositoryId, previousRevision, reason[] }
-repository://progress { repositoryId, stage, completed, total? }
+repository://changed { repositoryId, previousRevision, reasons[] }
 ```
 
-Mutation commands (later phase):
+`get_object_details` and progress streaming remain deferred. Full commit diffs are loaded lazily, and server-side bounds cap blob/probe/file limits even when the frontend supplies larger options.
 
-```text
-preview_transaction(repository_id, base_revision, operations, target="copy")
-confirm_transaction(repository_id, transaction_id, preview_revision, target_mode)
-apply_transaction(repository_id, transaction_id, confirm_token)
-cancel_transaction(repository_id, transaction_id)
-```
+Mutation preview/apply commands are also deferred to Phase 5+. Phase 4 exposes no mutation/apply Tauri commands, and original-repository destructive apply remains unavailable.
 
 ## 5. graph-elements mapping contract
 

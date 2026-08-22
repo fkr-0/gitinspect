@@ -143,9 +143,9 @@ export interface GitRepositorySnapshot {
   readonly schemaVersion: 1;
   readonly repositoryPath: string;
   readonly gitDir: string;
-  /** Resolved object ID currently selected by HEAD, when HEAD is born. */
+  /** Resolved object ID currently selected by HEAD, when HEAD resolves to an object. */
   readonly head?: string;
-  /** Authoritative symbolic HEAD referent (for example refs/heads/main); absent when detached. */
+  /** Authoritative symbolic HEAD referent (for example refs/heads/main); present for attached/unborn branches, absent when detached. */
   readonly headRef?: string;
   readonly revision: string;
   readonly commits: readonly GitCommitRecord[];

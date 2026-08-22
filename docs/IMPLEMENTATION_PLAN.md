@@ -34,7 +34,7 @@ Status: **complete** at the Phase-3 integration baseline through `b5271df` plus 
 
 The integrated framework exposes GraphWorld/render planning, camera/interaction/labels, deterministic layout/LOD, transactions, and drill-down through the public package barrel. The Rust backend opens real worktree/git-dir/linked-worktree/bare repositories and supplies metadata-first snapshots plus lazy bounded diffs. The Tauri shell is runnable and consumes GraphWorld through the public package boundary.
 
-Known Phase-4 integration seams are explicit rather than guessed: `GitRepositorySnapshot.head` currently carries the resolved HEAD object ID in the Rust backend; a symbolic HEAD ref needs a separate field if the UI requires both identities. Repository `revision` is a structural snapshot fingerprint for refresh invalidation, not yet a sufficient destructive-mutation freshness token because index/worktree state and hook contents are outside that fingerprint. The watcher core is deterministic/coalescing but still needs a native filesystem event adapter.
+The Phase-3 seams were resolved in Phase 4 without changing the trust boundary. `GitRepositorySnapshot.head` is explicitly the resolved HEAD object ID while `headRef` is the authoritative symbolic referent (present for attached/unborn branches and absent for detached HEAD). Repository `revision` remains a structural snapshot fingerprint for refresh invalidation, not a destructive-mutation freshness token because index/worktree state and hook contents are outside that fingerprint. The deterministic watcher core now has a native `notify` adapter over the worktree Git directory and shared common directory.
 
 ### Worker A — graph-elements rendering core
 
@@ -60,17 +60,22 @@ Each worker updates `CHANGELOG.md` only by posting a coordination note to the ar
 
 ## Phase 4 — Git visual mapping and end-to-end world
 
-Status: **ready to dispatch** from the integrated Phase-3 baseline.
+Status: **complete** through the Phase-4 integration commits `1082529`, `4b2ab8c`, `48b5e80`, `0a39c0b`, `b0c9d07`, and `b4d995d`.
 
-After Phase-3 contracts settle:
+Delivered:
 
-- Commit procedural mapper: plates, text cubes, binary spheres, tag enclosure, branch indicators, labels.
-- Branch/tag/stash/remote mapper.
-- Git-specific edge visual grammar.
-- Git layout constraint adapter.
-- inspection panel with lazy commit diff.
-- live repository watcher integration.
-- real-repository smoke test against gitinspect itself and at least one additional repository.
+- deterministic real-snapshot → semantic `GraphDataset` mapping with stable commit/ref/remote/HEAD identities, truncated-history boundary nodes, ancestry/ref/tracking relations, and no dangling graph edges;
+- Git layout constraints over the generic `LayoutEngine`: ancestry-monotonic Y, first-parent continuity, branch lanes, target-orbit refs/tags/stashes, and remote islands outside the local-history hull;
+- app-local procedural Git mapper/theme for commits, changed-file classes, branches, tags, stashes, remotes, HEAD, signatures, and semantic edge styles;
+- public `GraphWorld` consumption with the Git mapper, Git layout, and configurable edge-style registry—no app-local renderer fork;
+- explicit HEAD contract: `head` is the resolved object ID; `headRef` is the authoritative symbolic referent and is never inferred from coincident ref targets;
+- native `notify` filesystem refresh over worktree Git/common directories, surfaced through narrow Tauri commands/events and opaque Rust-owned repository handles;
+- native folder/file repository selection, metadata-first open/refresh, optimistic stale-revision guards, race re-check after refresh I/O, and frontend event filtering/cleanup;
+- lazy bounded `GitCommitDiff` inspection with server-side limits that frontend callers may tighten but cannot widen;
+- real-repository coverage against gitinspect plus repository-local generated fixtures for open/refresh/diff/watch behavior;
+- original-repository destructive mutation apply remains absent: no Tauri mutation/apply commands are exposed and the app controls stay inert.
+
+Current Phase-4 fidelity limits are intentional and visible. The backend does not yet distinguish annotated from lightweight tags or report remote fetch/push status; `EdgeVisualDescriptor` currently permits one edge color, so merge edges are thicker single-color rather than true dual-band; native commit-file details hydrate the inspector lazily but are not yet merged back into the live world as post-load file sub-elements; full patch/hunk/blob drill-down remains Phase 5.
 
 ## Phase 5 — scale and mutation studio
 
