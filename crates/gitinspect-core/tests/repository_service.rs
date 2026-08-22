@@ -98,6 +98,16 @@ fn distinguishes_resolved_head_oid_from_symbolic_head_ref() {
 }
 
 #[test]
+fn preserves_symbolic_head_for_an_unborn_branch() {
+    let repo = FixtureRepo::new("unborn-head");
+
+    let (_, snapshot) = RepositoryService::open(&repo.path, OpenOptions::default()).unwrap();
+    assert_eq!(snapshot.head, None);
+    assert_eq!(snapshot.head_ref.as_deref(), Some("refs/heads/main"));
+    assert!(snapshot.commits.is_empty());
+}
+
+#[test]
 fn handle_watch_coalesces_a_deterministic_event_source() {
     let repo = FixtureRepo::new("watch");
     repo.write("one.txt", "one\n");
