@@ -52,4 +52,24 @@ describe("createSearchHighlightMapper", () => {
       interactionKey: "commit:a",
     });
   });
+  it("preserves an active related-selection resolver while decorating visuals", () => {
+    const dataset: GraphDataset = {
+      revision: "r-relations",
+      nodes: [{ id: "commit:a", kind: "commit", properties: {} }],
+      edges: [],
+    };
+    const base: DataMapper = {
+      mapNode: (node) => ({ nodeId: node.id, elements: [] }),
+      mapEdge: (edge) => ({ edgeId: edge.id, style: "solid", color: "#fff", width: 1 }),
+      relatedSelectionIds: (selection) => [`related:${selection.elementId ?? "none"}`],
+    };
+    const mapper = createSearchHighlightMapper(base, { hitIds: new Set(), byId: new Map() });
+
+    expect(
+      mapper.relatedSelectionIds?.(
+        { elementId: "commit:a", granularity: "edge-group", relatedIds: [] },
+        dataset,
+      ),
+    ).toEqual(["related:commit:a"]);
+  });
 });
