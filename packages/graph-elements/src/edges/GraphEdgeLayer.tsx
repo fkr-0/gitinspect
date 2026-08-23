@@ -1,20 +1,92 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { useFrame } from "@react-three/fiber";
-import { Color, InstancedMesh, Matrix4, Quaternion, Vector3 } from "three";
+import { useFrame, type ThreeEvent } from "@react-three/fiber";
+import { Color, type InstancedMesh, Matrix4, Quaternion, Vector3 } from "three";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
+import type { ModifierState, PickReference } from "../interaction";
 import type {
   EdgeRenderPlan,
   PlannedEdgeBatch,
+  PlannedEdgeHead,
   PlannedEdgeHeadBatch,
+  PlannedEdgeSegment,
+  SemanticRenderIdentity,
 } from "../rendering/types";
+
+export interface GraphEdgeInteractionEvent {
+  readonly reference: PickReference;
+  readonly identity: SemanticRenderIdentity;
+  readonly modifiers: ModifierState;
+}
+
+export interface GraphEdgeInteractionHandlers {
+  readonly onClick?: (event: GraphEdgeInteractionEvent) => void;
+  readonly onContextMenu?: (event: GraphEdgeInteractionEvent) => void;
+  readonly onHoverChange?: (event: GraphEdgeInteractionEvent | undefined) => void;
+}
 
 export interface GraphEdgeLayerProps {
   readonly plan: EdgeRenderPlan;
+  readonly interaction?: GraphEdgeInteractionHandlers;
 }
 
-function EdgeBatch({ batch }: { readonly batch: PlannedEdgeBatch }) {
+function modifiersFromEvent(event: ThreeEvent<MouseEvent | PointerEvent>): ModifierState {
+  return {
+    shift: event.nativeEvent.shiftKey,
+    ctrl: event.nativeEvent.ctrlKey,
+    meta: event.nativeEvent.metaKey,
+    alt: event.nativeEvent.altKey,
+  };
+}
+
+function edgeInteractionEvent(
+  objectId: string,
+  instanceId: number,
+  identity: PlannedEdgeSegment | PlannedEdgeHead | undefined,
+  modifiers: ModifierState = {},
+): GraphEdgeInteractionEvent | undefined {
+  if (!identity) return undefined;
+  return {
+    reference: { objectId, instanceId },
+    identity,
+    modifiers,
+  };
+}
+
+export function edgeInteractionForSegment(
+  batch: PlannedEdgeBatch,
+  segmentIndex: number,
+  modifiers: ModifierState = {},
+): GraphEdgeInteractionEvent | undefined {
+  return edgeInteractionEvent(
+    `edge-segments:${batch.key}`,
+    segmentIndex,
+    batch.segments[segmentIndex],
+    modifiers,
+  );
+}
+
+export function edgeInteractionForHead(
+  batch: PlannedEdgeHeadBatch,
+  instanceId: number,
+  modifiers: ModifierState = {},
+): GraphEdgeInteractionEvent | undefined {
+  return edgeInteractionEvent(
+    `edge-heads:${batch.key}`,
+    instanceId,
+    batch.heads[instanceId],
+    modifiers,
+  );
+}
+
+function EdgeBatch({
+  batch,
+  interaction,
+}: {
+  readonly batch: PlannedEdgeBatch;
+  readonly interaction?: GraphEdgeInteractionHandlers;
+}) {
   const geometry = useMemo(() => {
     const positions = new Float32Array(batch.segments.length * 6);
     batch.segments.forEach((segment, index) => {
@@ -32,7 +104,10 @@ function EdgeBatch({ batch }: { readonly batch: PlannedEdgeBatch }) {
       transparent: batch.style.opacity < 1,
       opacity: batch.style.opacity,
       dashed,
-      dashSize: batch.style.pattern === "dotted" ? Math.min(batch.style.dashSize, 0.1) : batch.style.dashSize,
+      dashSize:
+        batch.style.pattern === "dotted"
+          ? Math.min(batch.style.dashSize, 0.1)
+          : batch.style.dashSize,
       gapSize: batch.style.gapSize,
       worldUnits: false,
     });
@@ -43,13 +118,15 @@ function EdgeBatch({ batch }: { readonly batch: PlannedEdgeBatch }) {
     if (batch.style.pattern !== "solid") line.computeLineDistances();
     line.userData = {
       renderBatchKey: batch.key,
-      segmentSemantics: batch.segments.map(({ ownerId, elementId, interactionKey, edgeId, segmentIndex }) => ({
-        ownerId,
-        elementId,
-        interactionKey,
-        edgeId,
-        segmentIndex,
-      })),
+      segmentSemantics: batch.segments.map(
+        ({ ownerId, elementId, interactionKey, edgeId, segmentIndex }) => ({
+          ownerId,
+          elementId,
+          interactionKey,
+          edgeId,
+          segmentIndex,
+        }),
+      ),
     };
     return line;
   }, [batch, geometry, material]);
@@ -60,15 +137,81 @@ function EdgeBatch({ batch }: { readonly batch: PlannedEdgeBatch }) {
     }
   });
 
-  useEffect(() => () => {
-    geometry.dispose();
-    material.dispose();
-  }, [geometry, material]);
+  useEffect(
+    () => () => {
+      geometry.dispose();
+      material.dispose();
+    },
+    [geometry, material],
+  );
 
-  return <primitive object={object} />;
+  return (
+    <primitive
+      object={object}
+      {...(interaction?.onClick
+        ? {
+            onClick: (event: ThreeEvent<MouseEvent>) => {
+              const segmentIndex = event.faceIndex;
+              if (typeof segmentIndex !== "number") return;
+              const semantic = edgeInteractionForSegment(
+                batch,
+                segmentIndex,
+                modifiersFromEvent(event),
+              );
+              if (!semantic) return;
+              event.stopPropagation();
+              interaction.onClick?.(semantic);
+            },
+          }
+        : {})}
+      {...(interaction?.onContextMenu
+        ? {
+            onContextMenu: (event: ThreeEvent<MouseEvent>) => {
+              const segmentIndex = event.faceIndex;
+              if (typeof segmentIndex !== "number") return;
+              const semantic = edgeInteractionForSegment(
+                batch,
+                segmentIndex,
+                modifiersFromEvent(event),
+              );
+              if (!semantic) return;
+              event.nativeEvent.preventDefault();
+              event.stopPropagation();
+              interaction.onContextMenu?.(semantic);
+            },
+          }
+        : {})}
+      {...(interaction?.onHoverChange
+        ? {
+            onPointerOver: (event: ThreeEvent<PointerEvent>) => {
+              const segmentIndex = event.faceIndex;
+              if (typeof segmentIndex !== "number") return;
+              const semantic = edgeInteractionForSegment(
+                batch,
+                segmentIndex,
+                modifiersFromEvent(event),
+              );
+              if (!semantic) return;
+              event.stopPropagation();
+              interaction.onHoverChange?.(semantic);
+            },
+            onPointerOut: (event: ThreeEvent<PointerEvent>) => {
+              event.stopPropagation();
+              interaction.onHoverChange?.(undefined);
+            },
+          }
+        : {})}
+    />
+  );
 }
 
-function HeadBatch({ batch }: { readonly batch: PlannedEdgeHeadBatch }) {
+function HeadBatch({
+  batch,
+  interaction,
+}: {
+  readonly batch: PlannedEdgeHeadBatch;
+  readonly interaction?: GraphEdgeInteractionHandlers;
+}) {
   const meshRef = useRef<InstancedMesh>(null);
 
   useLayoutEffect(() => {
@@ -112,10 +255,53 @@ function HeadBatch({ batch }: { readonly batch: PlannedEdgeHeadBatch }) {
           edgeId,
         })),
       }}
+      {...(interaction?.onClick
+        ? {
+            onClick: (event: ThreeEvent<MouseEvent>) => {
+              const instanceId = event.instanceId;
+              if (instanceId === undefined) return;
+              const semantic = edgeInteractionForHead(batch, instanceId, modifiersFromEvent(event));
+              if (!semantic) return;
+              event.stopPropagation();
+              interaction.onClick?.(semantic);
+            },
+          }
+        : {})}
+      {...(interaction?.onContextMenu
+        ? {
+            onContextMenu: (event: ThreeEvent<MouseEvent>) => {
+              const instanceId = event.instanceId;
+              if (instanceId === undefined) return;
+              const semantic = edgeInteractionForHead(batch, instanceId, modifiersFromEvent(event));
+              if (!semantic) return;
+              event.nativeEvent.preventDefault();
+              event.stopPropagation();
+              interaction.onContextMenu?.(semantic);
+            },
+          }
+        : {})}
+      {...(interaction?.onHoverChange
+        ? {
+            onPointerOver: (event: ThreeEvent<PointerEvent>) => {
+              const instanceId = event.instanceId;
+              if (instanceId === undefined) return;
+              const semantic = edgeInteractionForHead(batch, instanceId, modifiersFromEvent(event));
+              if (!semantic) return;
+              event.stopPropagation();
+              interaction.onHoverChange?.(semantic);
+            },
+            onPointerOut: (event: ThreeEvent<PointerEvent>) => {
+              event.stopPropagation();
+              interaction.onHoverChange?.(undefined);
+            },
+          }
+        : {})}
     >
-      {batch.kind === "arrow"
-        ? <coneGeometry args={[0.5, 1, 12]} />
-        : <octahedronGeometry args={[0.5, 0]} />}
+      {batch.kind === "arrow" ? (
+        <coneGeometry args={[0.5, 1, 12]} />
+      ) : (
+        <octahedronGeometry args={[0.5, 0]} />
+      )}
       <meshStandardMaterial
         transparent={batch.opacity < 1}
         opacity={batch.opacity}
@@ -126,11 +312,23 @@ function HeadBatch({ batch }: { readonly batch: PlannedEdgeHeadBatch }) {
   );
 }
 
-export function GraphEdgeLayer({ plan }: GraphEdgeLayerProps) {
+export function GraphEdgeLayer({ plan, interaction }: GraphEdgeLayerProps) {
   return (
     <group name="graph-edge-layer">
-      {plan.batches.map((batch) => <EdgeBatch key={batch.key} batch={batch} />)}
-      {plan.headBatches.map((batch) => <HeadBatch key={batch.key} batch={batch} />)}
+      {plan.batches.map((batch) => (
+        <EdgeBatch
+          key={batch.key}
+          batch={batch}
+          {...(interaction === undefined ? {} : { interaction })}
+        />
+      ))}
+      {plan.headBatches.map((batch) => (
+        <HeadBatch
+          key={batch.key}
+          batch={batch}
+          {...(interaction === undefined ? {} : { interaction })}
+        />
+      ))}
     </group>
   );
 }
