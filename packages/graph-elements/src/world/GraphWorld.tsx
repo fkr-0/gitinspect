@@ -5,7 +5,7 @@ import type {
   GraphNodeRecord,
   Vec3,
 } from "@gitinspect/contracts";
-import { GraphEdgeLayer } from "../edges/GraphEdgeLayer";
+import { GraphEdgeLayer, type GraphEdgeInteractionHandlers } from "../edges/GraphEdgeLayer";
 import {
   defaultEdgeStyleRegistry,
   type EdgeStyleRegistry,
@@ -75,6 +75,7 @@ export interface GraphWorldProps<
   readonly lighting?: Partial<GraphLightingConfig>;
   readonly background?: GraphBackgroundConfig | null;
   readonly renderLabel?: (label: PlannedNodeLabel) => ReactNode;
+  readonly edgeInteraction?: GraphEdgeInteractionHandlers;
 }
 
 function resolveLighting(overrides: Partial<GraphLightingConfig> | undefined): GraphLightingConfig {
@@ -93,6 +94,7 @@ export function GraphWorld<
   lighting: lightingOverrides,
   background = DEFAULT_GRAPH_BACKGROUND,
   renderLabel,
+  edgeInteraction,
 }: GraphWorldProps<TNode, TEdge>) {
   const positions = useMemo(
     () => resolveNodePositions(dataset.nodes, nodePositions),
@@ -147,7 +149,10 @@ export function GraphWorld<
         position={lighting.fillPosition}
       />
       <group name="graph-world" userData={{ revision: dataset.revision }}>
-        <GraphEdgeLayer plan={edgePlan} />
+        <GraphEdgeLayer
+          plan={edgePlan}
+          {...(edgeInteraction === undefined ? {} : { interaction: edgeInteraction })}
+        />
         {renderLabel
           ? <GraphNodeLayer plan={nodePlan} renderLabel={renderLabel} />
           : <GraphNodeLayer plan={nodePlan} />}

@@ -29,8 +29,16 @@ export type { DataMapper, GraphDatasetView, MappingContext } from "./world/mappi
 
 export { GraphNodeLayer } from "./nodes/GraphNodeLayer";
 export type { GraphNodeLayerProps } from "./nodes/GraphNodeLayer";
-export { GraphEdgeLayer } from "./edges/GraphEdgeLayer";
-export type { GraphEdgeLayerProps } from "./edges/GraphEdgeLayer";
+export {
+  GraphEdgeLayer,
+  edgeInteractionForHead,
+  edgeInteractionForSegment,
+} from "./edges/GraphEdgeLayer";
+export type {
+  GraphEdgeInteractionEvent,
+  GraphEdgeInteractionHandlers,
+  GraphEdgeLayerProps,
+} from "./edges/GraphEdgeLayer";
 export {
   DEFAULT_EDGE_STYLES,
   EdgeStyleRegistry,
