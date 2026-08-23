@@ -2,12 +2,16 @@ import type { GitCommitFileChange } from "@gitinspect/contracts";
 import type {
   DataMapper,
   EdgeVisualDescriptor,
+  ElementId,
+  GraphDatasetView,
   GraphEdgeRecord,
   GraphNodeRecord,
   NodeVisualDescriptor,
+  SelectionState,
   VisualElementDescriptor,
 } from "@gitinspect/graph-elements";
 
+import { gitGraphIds } from "./graphAdapter";
 import {
   DEFAULT_GIT_VISUAL_THEME,
   type GitVisualTheme,
@@ -117,7 +121,7 @@ function commitDescriptor(node: GraphNodeRecord, theme: GitVisualTheme): NodeVis
       scale: [plateWidth + 0.42, plateThickness + 0.72, 1.97],
       color: theme.commit.tagShell,
       opacity: 0.17,
-      interactionKey: node.id,
+      interactionKey: tags.length === 1 && tags[0] ? gitGraphIds.ref(tags[0]) : node.id,
       metadata: { role: "tag-enclosure", tags, count: tags.length },
     });
   }
@@ -130,7 +134,7 @@ function commitDescriptor(node: GraphNodeRecord, theme: GitVisualTheme): NodeVis
       scale: [0.1, 0.32, 0.1],
       color: theme.commit.localBranchIndicator,
       emissive: "#173526",
-      interactionKey: node.id,
+      interactionKey: gitGraphIds.ref(branch),
       metadata: { role: "branch-indicator", branch, scope: "local" },
     });
   });
@@ -143,7 +147,7 @@ function commitDescriptor(node: GraphNodeRecord, theme: GitVisualTheme): NodeVis
       scale: [0.1, 0.32, 0.1],
       color: theme.commit.remoteBranchIndicator,
       opacity: 0.72,
-      interactionKey: node.id,
+      interactionKey: gitGraphIds.ref(branch),
       metadata: { role: "branch-indicator", branch, scope: "remote", pulsing: true },
     });
   });
@@ -395,6 +399,186 @@ function edgeDescriptor(edge: GraphEdgeRecord, theme: GitVisualTheme): EdgeVisua
   }
 }
 
+function uniqueOrdered(ids: readonly ElementId[]): readonly ElementId[] {
+  const seen = new Set<ElementId>();
+  const result: ElementId[] = [];
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    result.push(id);
+  }
+  return result;
+}
+
+function effectiveSelectionElementId(
+  selection: SelectionState,
+  dataset: GraphDatasetView,
+): ElementId | undefined {
+  if (
+    selection.interactionKey &&
+    dataset.nodes.some((node) => node.id === selection.interactionKey)
+  ) {
+    return selection.interactionKey;
+  }
+  return selection.elementId;
+}
+
+function connectedEdgeIds(elementId: ElementId, dataset: GraphDatasetView): readonly ElementId[] {
+  const selectedEdge = dataset.edges.find((edge) => edge.id === elementId);
+  if (selectedEdge) {
+    const endpoints = new Set([selectedEdge.source, selectedEdge.target]);
+    return dataset.edges
+      .filter((edge) => endpoints.has(edge.source) || endpoints.has(edge.target))
+      .map((edge) => edge.id)
+      .sort((left, right) => left.localeCompare(right));
+  }
+  return dataset.edges
+    .filter((edge) => edge.source === elementId || edge.target === elementId)
+    .map((edge) => edge.id)
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function resolveChainStart(
+  elementId: ElementId,
+  dataset: GraphDatasetView,
+): { readonly prefix: readonly ElementId[]; readonly nodeId?: ElementId } {
+  const edge = dataset.edges.find((candidate) => candidate.id === elementId);
+  if (edge) return { prefix: [edge.id, edge.target], nodeId: edge.target };
+
+  const node = dataset.nodes.find((candidate) => candidate.id === elementId);
+  if (!node) return { prefix: [elementId] };
+  if (["local-branch", "remote-branch", "tag", "stash"].includes(node.kind)) {
+    const targetEdge = dataset.edges.find(
+      (candidate) =>
+        candidate.source === node.id &&
+        ["ref-target", "tag-target", "stash-base"].includes(candidate.kind),
+    );
+    if (targetEdge) {
+      return {
+        prefix: [node.id, targetEdge.id, targetEdge.target],
+        nodeId: targetEdge.target,
+      };
+    }
+  }
+  if (node.kind === "head") {
+    const headEdge = dataset.edges.find((candidate) => candidate.source === node.id);
+    if (headEdge) {
+      const headTarget = dataset.nodes.find((candidate) => candidate.id === headEdge.target);
+      if (
+        headTarget &&
+        ["local-branch", "remote-branch", "tag", "stash"].includes(headTarget.kind)
+      ) {
+        const resolved = resolveChainStart(headTarget.id, dataset);
+        const result: { readonly prefix: readonly ElementId[]; readonly nodeId?: ElementId } = {
+          prefix: [node.id, headEdge.id, ...resolved.prefix],
+        };
+        if (resolved.nodeId !== undefined) {
+          return { ...result, nodeId: resolved.nodeId };
+        }
+        return result;
+      }
+      return { prefix: [node.id, headEdge.id, headEdge.target], nodeId: headEdge.target };
+    }
+  }
+  return { prefix: [node.id], nodeId: node.id };
+}
+
+function firstParentChainIds(
+  elementId: ElementId,
+  dataset: GraphDatasetView,
+): readonly ElementId[] {
+  const start = resolveChainStart(elementId, dataset);
+  const ids: ElementId[] = [...start.prefix];
+  let current = start.nodeId;
+  const visited = new Set<ElementId>();
+  while (current && !visited.has(current)) {
+    visited.add(current);
+    const parentEdge = dataset.edges.find(
+      (edge) =>
+        edge.target === current &&
+        (edge.kind === "history" || edge.kind === "merge-parent") &&
+        edge.properties.firstParent === true,
+    );
+    if (!parentEdge) break;
+    ids.push(parentEdge.id, parentEdge.source);
+    current = parentEdge.source;
+  }
+  return uniqueOrdered(ids);
+}
+
+function clusterAnchorId(elementId: ElementId, dataset: GraphDatasetView): ElementId | undefined {
+  const edge = dataset.edges.find((candidate) => candidate.id === elementId);
+  if (edge) return edge.target;
+  const node = dataset.nodes.find((candidate) => candidate.id === elementId);
+  if (!node) return undefined;
+  if (["local-branch", "remote-branch", "tag", "stash"].includes(node.kind)) {
+    return dataset.edges.find(
+      (candidate) =>
+        candidate.source === node.id &&
+        ["ref-target", "tag-target", "stash-base"].includes(candidate.kind),
+    )?.target;
+  }
+  return node.id;
+}
+
+function branchTagClusterIds(
+  elementId: ElementId,
+  dataset: GraphDatasetView,
+): readonly ElementId[] {
+  const anchor = clusterAnchorId(elementId, dataset);
+  if (!anchor) return [elementId];
+  const refEdges = dataset.edges
+    .filter(
+      (edge) =>
+        edge.target === anchor &&
+        ["ref-target", "tag-target", "stash-base", "head-resolved"].includes(edge.kind),
+    )
+    .sort((left, right) => left.id.localeCompare(right.id));
+  return uniqueOrdered([elementId, anchor, ...refEdges.flatMap((edge) => [edge.id, edge.source])]);
+}
+
+export function relatedGitSelectionIds(
+  selection: SelectionState,
+  dataset: GraphDatasetView,
+): readonly ElementId[] {
+  const elementId = effectiveSelectionElementId(selection, dataset);
+  if (!elementId) return [];
+  switch (selection.granularity) {
+    case "sub-element":
+      return [selection.interactionKey ?? elementId];
+    case "node":
+      return [selection.elementId ?? elementId];
+    case "edge-group":
+      return connectedEdgeIds(elementId, dataset);
+    case "chain":
+      return firstParentChainIds(elementId, dataset);
+    case "cluster":
+      return branchTagClusterIds(elementId, dataset);
+  }
+}
+
+export function changedFilePathForGitSelection(
+  selection: Pick<SelectionState, "elementId" | "interactionKey" | "granularity">,
+  dataset: GraphDatasetView,
+): string | undefined {
+  if (
+    selection.granularity !== "sub-element" ||
+    !selection.elementId ||
+    !selection.interactionKey
+  ) {
+    return undefined;
+  }
+  const node = dataset.nodes.find(
+    (candidate) => candidate.id === selection.elementId && candidate.kind === "commit",
+  );
+  if (!node) return undefined;
+  const oid = text(node.properties.oid, node.id.replace(/^commit:/, ""));
+  const prefix = `file:${oid}:`;
+  if (!selection.interactionKey.startsWith(prefix)) return undefined;
+  const path = selection.interactionKey.slice(prefix.length);
+  return fileChanges(node.properties.files).some((file) => file.path === path) ? path : undefined;
+}
+
 export function createGitVisualMapper(
   theme: GitVisualTheme = DEFAULT_GIT_VISUAL_THEME,
 ): DataMapper {
@@ -406,6 +590,9 @@ export function createGitVisualMapper(
     },
     mapEdge(edge) {
       return edgeDescriptor(edge, theme);
+    },
+    relatedSelectionIds(selection, dataset) {
+      return relatedGitSelectionIds(selection, dataset);
     },
   };
 }
