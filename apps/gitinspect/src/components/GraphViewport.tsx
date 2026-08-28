@@ -866,6 +866,7 @@ export function GraphViewport({
             }}
             type="button"
             className="viewport-node"
+            data-element-id={logicalElementId}
             tabIndex={node.id === rovingTabStopId ? 0 : -1}
             data-selected={selected || undefined}
             data-hovered={hovered || undefined}

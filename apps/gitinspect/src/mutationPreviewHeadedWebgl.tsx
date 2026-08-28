@@ -340,6 +340,7 @@ async function run(): Promise<QualificationResult> {
     let accessibilityPressed = false;
     let accessibilityRoving = false;
     let accessibilityBlocker = "";
+    const selectedTransformedId = `commit:${selectedRewrite.newOid}`;
     try {
       const liveStatus = document.getElementById("viewport-mutation-status");
       accessibilityLive =
@@ -355,9 +356,7 @@ async function run(): Promise<QualificationResult> {
             ...document.querySelectorAll<HTMLButtonElement>(
               'button.viewport-node[aria-pressed="true"]',
             ),
-          ].some((button) =>
-            button.getAttribute("aria-label")?.includes("Phase 38 headed rewritten commit"),
-          ),
+          ].some((button) => button.dataset.elementId === selectedTransformedId),
         30_000,
       );
       const projectedButtons = [
@@ -366,7 +365,7 @@ async function run(): Promise<QualificationResult> {
       const selectedButton = projectedButtons.find(
         (button) =>
           button.getAttribute("aria-pressed") === "true" &&
-          button.getAttribute("aria-label")?.includes("Phase 38 headed rewritten commit"),
+          button.dataset.elementId === selectedTransformedId,
       );
       accessibilityPressed = selectedButton !== undefined;
       const rovingTabStops = projectedButtons.filter((button) => button.tabIndex === 0);
@@ -386,6 +385,8 @@ async function run(): Promise<QualificationResult> {
     } catch (error: unknown) {
       accessibilityBlocker = error instanceof Error ? error.message : String(error);
     }
+    assert(accessibilityBlocker === "", `headed browser accessibility blocker: ${accessibilityBlocker}`);
+    assert(accessibilityLive && accessibilityPressed && accessibilityRoving, "headed browser projected-node accessibility is incomplete");
 
     return {
       passed: true,

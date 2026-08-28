@@ -316,8 +316,13 @@ async function verifyHeadedTransformedTopologyAccessibility() {
   host.style.zIndex = "9999";
   document.body.append(host);
   const root = createRoot(host);
-  const selectedRewrite = preview.rewrittenCommits[0];
+  const selectedRewrite = preview.rewrittenCommits.at(-1);
   assert(selectedRewrite, "headed accessibility fixture has no rewrite lineage");
+  const selectedPreviewCommit = preview.graphDelta.commits.find(
+    (commit) => commit.oid === selectedRewrite.newOid,
+  );
+  assert(selectedPreviewCommit, "headed accessibility fixture omitted selected transformed commit");
+  const authoritativeTransformedIds = preview.graphDelta.commits.map((commit) => `commit:${commit.oid}`);
   let selectedElementId: string | undefined = `commit:${selectedRewrite.oldOid}`;
   const render = () => {
     root.render(
@@ -350,27 +355,36 @@ async function verifyHeadedTransformedTopologyAccessibility() {
   const liveStatus = host.querySelector<HTMLElement>("#viewport-mutation-status");
   const frameAccessibilityLive = liveStatus?.getAttribute("aria-live") === "polite";
   assert(frameAccessibilityLive, "transformed topology did not use a polite mutation live region");
+  await waitFor(
+    "effective transformed selection announcement",
+    () => text(host.querySelector("#viewport-selection-status")).includes(selectedPreviewCommit.message),
+    30_000,
+  );
+
+  const projectedAuthoritativeButton = () => {
+    const buttons = [
+      ...host.querySelectorAll<HTMLButtonElement>("button.viewport-node[data-mutation-affected]"),
+    ];
+    for (const elementId of authoritativeTransformedIds) {
+      const button = buttons.find((candidate) => candidate.dataset.elementId === elementId);
+      if (button) return button;
+    }
+    return undefined;
+  };
 
   await waitFor(
     "projected authoritative transformed node",
-    () =>
-      [
-        ...host.querySelectorAll<HTMLButtonElement>("button.viewport-node[data-mutation-affected]"),
-      ].some((button) =>
-        button.getAttribute("aria-label")?.includes("Frame transition rewritten commit"),
-      ),
+    () => Boolean(projectedAuthoritativeButton()),
     30_000,
   );
-  const previewButton = [
-    ...host.querySelectorAll<HTMLButtonElement>("button.viewport-node[data-mutation-affected]"),
-  ].find((button) =>
-    button.getAttribute("aria-label")?.includes("Frame transition rewritten commit"),
-  );
+  const previewButton = projectedAuthoritativeButton();
   assert(previewButton, "authoritative transformed node did not expose a projected button");
+  const projectedTransformedId = previewButton.dataset.elementId;
+  assert(projectedTransformedId, "projected authoritative transformed node omitted semantic identity");
   previewButton.click();
   await waitFor("transformed-node aria-pressed selection", () =>
     [...host.querySelectorAll<HTMLButtonElement>('button.viewport-node[aria-pressed="true"]')].some(
-      (button) => button.getAttribute("aria-label")?.includes("Frame transition rewritten commit"),
+      (button) => button.dataset.elementId === projectedTransformedId,
     ),
   );
   const frameAccessibilityPressed = true;
@@ -381,8 +395,7 @@ async function verifyHeadedTransformedTopologyAccessibility() {
     rovingButtons.length >= 2 &&
     rovingTabStops.length === 1 &&
     rovingTabStops[0]?.getAttribute("aria-pressed") === "true" &&
-    rovingTabStops[0]?.getAttribute("aria-label")?.includes("Frame transition rewritten commit") ===
-      true;
+    rovingTabStops[0]?.dataset.elementId === projectedTransformedId;
   assert(
     frameAccessibilityRoving,
     "selected authoritative transformed node did not own the single roving tab stop",
@@ -390,7 +403,12 @@ async function verifyHeadedTransformedTopologyAccessibility() {
 
   root.unmount();
   host.remove();
-  return { frameAccessibilityLive, frameAccessibilityPressed, frameAccessibilityRoving };
+  return {
+    frameAccessibilityLive,
+    frameAccessibilityPressed,
+    frameAccessibilityRoving,
+    frameAccessibilityElementId: projectedTransformedId,
+  };
 }
 
 async function stageSingleCommitRewrite(
@@ -466,6 +484,7 @@ interface SmokeReport {
   readonly frameAccessibilityLive: boolean;
   readonly frameAccessibilityPressed: boolean;
   readonly frameAccessibilityRoving: boolean;
+  readonly frameAccessibilityElementId: string;
   readonly frameAccessibilityBlocker: string;
 }
 
@@ -982,17 +1001,8 @@ async function run(): Promise<void> {
   status("measuring headed accelerated GraphScene mutation-preview frame cadence on 1k fixture…");
   const frameEvidence = await measureHeadedMutationPreviewFrames();
   status("verifying headed transformed-topology accessibility semantics…");
-  let accessibilityEvidence = {
-    frameAccessibilityLive: false,
-    frameAccessibilityPressed: false,
-    frameAccessibilityRoving: false,
-  };
-  let frameAccessibilityBlocker = "";
-  try {
-    accessibilityEvidence = await verifyHeadedTransformedTopologyAccessibility();
-  } catch (error: unknown) {
-    frameAccessibilityBlocker = error instanceof Error ? error.message : String(error);
-  }
+  const accessibilityEvidence = await verifyHeadedTransformedTopologyAccessibility();
+  const frameAccessibilityBlocker = "";
   const report: SmokeReport = {
     passed: true,
     message:
@@ -1066,6 +1076,7 @@ void run().catch(async (error: unknown) => {
     frameAccessibilityLive: false,
     frameAccessibilityPressed: false,
     frameAccessibilityRoving: false,
+    frameAccessibilityElementId: "",
     frameAccessibilityBlocker: "native smoke failed before headed accessibility qualification",
   };
   await tauri.core.invoke<void>("mutation_preview_native_smoke_complete", { report });

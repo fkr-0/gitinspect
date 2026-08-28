@@ -187,6 +187,7 @@ struct SmokeReport {
     frame_accessibility_live: bool,
     frame_accessibility_pressed: bool,
     frame_accessibility_roving: bool,
+    frame_accessibility_element_id: String,
     frame_accessibility_blocker: String,
 }
 
@@ -363,16 +364,22 @@ fn mutation_preview_native_smoke_complete(
             report.frame_timing_blocker, report.frame_samples
         ));
     }
-    if report.frame_accessibility_blocker.is_empty()
-        && (!report.frame_accessibility_live
-            || !report.frame_accessibility_pressed
-            || !report.frame_accessibility_roving)
+    if !report.frame_accessibility_blocker.is_empty() {
+        failures.push(format!(
+            "transformed-topology accessibility blocker: {}",
+            report.frame_accessibility_blocker
+        ));
+    } else if !report.frame_accessibility_live
+        || !report.frame_accessibility_pressed
+        || !report.frame_accessibility_roving
+        || report.frame_accessibility_element_id.is_empty()
     {
         failures.push(format!(
-            "transformed-topology accessibility evidence incomplete: live={}, pressed={}, roving={}",
+            "transformed-topology accessibility evidence incomplete: live={}, pressed={}, roving={}, element_id={}",
             report.frame_accessibility_live,
             report.frame_accessibility_pressed,
-            report.frame_accessibility_roving
+            report.frame_accessibility_roving,
+            report.frame_accessibility_element_id
         ));
     }
 
@@ -692,6 +699,7 @@ fn format_report(report: &SmokeReport, failures: &[String]) -> String {
             "frame_accessibility_live={}\n",
             "frame_accessibility_pressed={}\n",
             "frame_accessibility_roving={}\n",
+            "frame_accessibility_element_id={}\n",
             "frame_accessibility_blocker={}\n",
             "failures={}\n"
         ),
@@ -738,6 +746,7 @@ fn format_report(report: &SmokeReport, failures: &[String]) -> String {
         report.frame_accessibility_live,
         report.frame_accessibility_pressed,
         report.frame_accessibility_roving,
+        clean(&report.frame_accessibility_element_id),
         clean(&report.frame_accessibility_blocker),
         failures
             .iter()

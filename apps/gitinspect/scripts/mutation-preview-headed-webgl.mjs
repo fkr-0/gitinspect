@@ -90,10 +90,14 @@ function assertResult(result) {
     throw new Error("headed WebGL transformed-topology live-region evidence is missing");
   }
   if (
-    (!result.accessibilityPressed || !result.accessibilityRoving) &&
-    !result.accessibilityBlocker
+    !result.accessibilityLive ||
+    !result.accessibilityPressed ||
+    !result.accessibilityRoving ||
+    result.accessibilityBlocker
   ) {
-    throw new Error("headed WebGL projected-node accessibility failed without an explicit blocker");
+    throw new Error(
+      `headed WebGL projected-node accessibility is not qualified: ${result.accessibilityBlocker || "incomplete semantics"}`,
+    );
   }
 }
 
