@@ -102,6 +102,7 @@ struct OriginalState {
     refs: String,
     index: Vec<u8>,
     worktree: BTreeMap<String, Vec<u8>>,
+    repository_bytes: BTreeMap<String, Vec<u8>>,
 }
 
 impl Fixture {
@@ -197,11 +198,14 @@ impl Fixture {
         let index = fs::read(self.path.join(".git/index")).unwrap();
         let mut worktree = BTreeMap::new();
         collect_worktree(&self.path, &self.path, &mut worktree);
+        let mut repository_bytes = BTreeMap::new();
+        collect_regular_files(&self.path, &self.path, &mut repository_bytes);
         OriginalState {
             head,
             refs,
             index,
             worktree,
+            repository_bytes,
         }
     }
 }
@@ -813,6 +817,23 @@ where
         .unwrap();
     assert!(output.status.success());
     String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+fn collect_regular_files(root: &Path, current: &Path, output: &mut BTreeMap<String, Vec<u8>>) {
+    for entry in fs::read_dir(current).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        let relative = path.strip_prefix(root).unwrap();
+        let file_type = entry.file_type().unwrap();
+        if file_type.is_dir() {
+            collect_regular_files(root, &path, output);
+        } else if file_type.is_file() {
+            output.insert(
+                relative.to_string_lossy().into_owned(),
+                fs::read(path).unwrap(),
+            );
+        }
+    }
 }
 
 fn collect_worktree(root: &Path, current: &Path, output: &mut BTreeMap<String, Vec<u8>>) {
