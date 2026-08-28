@@ -23,6 +23,10 @@ import {
   ViewportProjectionBridge,
   type ViewportProjectionPoint,
 } from "./ViewportProjectionBridge";
+import {
+  type ViewportDiagnosticHandler,
+  viewportDiagnosticEnvironment,
+} from "./ViewportDiagnostics";
 
 export interface GraphSceneProps {
   readonly dataset: GraphDataset;
@@ -48,6 +52,7 @@ export interface GraphSceneProps {
   readonly onProjectionChange: (
     points: ReadonlyMap<ElementId, ViewportProjectionPoint>,
   ) => void;
+  readonly onDiagnosticEvent?: ViewportDiagnosticHandler;
 }
 
 /**
@@ -73,12 +78,33 @@ export function GraphScene({
   edgeInteraction,
   onCameraStateChange,
   onProjectionChange,
+  onDiagnosticEvent,
 }: GraphSceneProps) {
   return (
     <Canvas
       className="viewport__canvas"
       camera={{ position: cameraState.position, fov: 48, near: 0.1, far: visibilityRange.far }}
       dpr={[1, 1.75]}
+      onCreated={(state) => {
+        if (!onDiagnosticEvent) return;
+        const rect = state.gl.domElement.getBoundingClientRect();
+        onDiagnosticEvent({
+          stage: "scene-created",
+          ...viewportDiagnosticEnvironment(),
+          ...(selectedElementId ? { selectedElementId } : {}),
+          projectedLabelIds: projectedLabelIds.slice(0, 48),
+          ...(topologyFit?.key ? { topologyFitKey: topologyFit.key } : {}),
+          ...(topologyFit?.targetElementId
+            ? { topologyFitTargetElementId: topologyFit.targetElementId }
+            : {}),
+          r3fWidth: state.size.width,
+          r3fHeight: state.size.height,
+          r3fAspect: state.size.height > 0 ? state.size.width / state.size.height : 0,
+          canvasWidth: rect.width,
+          canvasHeight: rect.height,
+          cameraPosition: [state.camera.position.x, state.camera.position.y, state.camera.position.z],
+        });
+      }}
     >
       <ViewportCameraBridge
         controller={controller}
@@ -89,11 +115,13 @@ export function GraphScene({
         nodePositions={nodePositions}
         {...(topologyFit === undefined ? {} : { topologyFit })}
         onCameraStateChange={onCameraStateChange}
+        {...(onDiagnosticEvent ? { onDiagnosticEvent } : {})}
       />
       <ViewportProjectionBridge
         elementIds={projectedLabelIds}
         nodePositions={nodePositions}
         onProjectionChange={onProjectionChange}
+        {...(onDiagnosticEvent ? { onDiagnosticEvent } : {})}
       />
       <GraphWorld
         dataset={dataset}

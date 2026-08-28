@@ -13,6 +13,10 @@ import {
   fitGitCameraToBounds,
   type GitCameraFitBounds,
 } from "./gitCameraFit";
+import {
+  type ViewportDiagnosticHandler,
+  viewportDiagnosticEnvironment,
+} from "./ViewportDiagnostics";
 
 const DEFAULT_LOD_SAMPLE_DISTANCE = 8;
 const LOOK_SENSITIVITY = 0.004;
@@ -58,6 +62,7 @@ interface ViewportCameraBridgeProps extends ViewportCameraIntent {
   readonly cameraState: CameraState;
   readonly topologyFit?: ViewportTopologyFitRequest;
   readonly onCameraStateChange: (camera: CameraState) => void;
+  readonly onDiagnosticEvent?: ViewportDiagnosticHandler;
 }
 
 function samePosition(left: Vec3, right: Vec3): boolean {
@@ -130,6 +135,7 @@ export function ViewportCameraBridge({
   nodePositions,
   topologyFit,
   onCameraStateChange,
+  onDiagnosticEvent,
 }: ViewportCameraBridgeProps) {
   const { camera, gl, size } = useThree();
   const keysRef = useRef(new Set<string>());
@@ -137,30 +143,74 @@ export function ViewportCameraBridge({
   const draggingRef = useRef(false);
   const lastPointerRef = useRef<[number, number] | undefined>(undefined);
   const lastTopologyFitKeyRef = useRef<string | undefined>(undefined);
+  const diagnosticFrameCountRef = useRef(0);
+
+  useEffect(() => {
+    diagnosticFrameCountRef.current = 0;
+    if (!onDiagnosticEvent) return;
+    const rect = gl.domElement.getBoundingClientRect();
+    onDiagnosticEvent({
+      stage: "r3f-size",
+      ...viewportDiagnosticEnvironment(),
+      ...(selectedElementId ? { selectedElementId } : {}),
+      ...(topologyFit?.key ? { topologyFitKey: topologyFit.key } : {}),
+      ...(topologyFit?.targetElementId
+        ? { topologyFitTargetElementId: topologyFit.targetElementId }
+        : {}),
+      r3fWidth: size.width,
+      r3fHeight: size.height,
+      r3fAspect: size.height > 0 ? size.width / size.height : 0,
+      canvasWidth: rect.width,
+      canvasHeight: rect.height,
+    });
+  }, [gl, onDiagnosticEvent, selectedElementId, size.height, size.width, topologyFit]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally narrow — restores camera state only on external cameraState changes
   useEffect(() => {
     controller.restore(cameraState);
-    onCameraStateChange(
-      applyViewportCameraIntent(controller, {
-        cameraMode,
-        pointerMode,
-        selectedElementId,
-        nodePositions,
-      }),
-    );
+    const next = applyViewportCameraIntent(controller, {
+      cameraMode,
+      pointerMode,
+      selectedElementId,
+      nodePositions,
+    });
+    onDiagnosticEvent?.({
+      stage: "camera-restore",
+      ...viewportDiagnosticEnvironment(),
+      ...(selectedElementId ? { selectedElementId } : {}),
+      cameraPosition: [...next.position],
+      cameraTarget: [...next.target],
+      ...(next.attachedNodeId ? { cameraAttachedNodeId: next.attachedNodeId } : {}),
+      ...(topologyFit?.key ? { topologyFitKey: topologyFit.key } : {}),
+    });
+    onCameraStateChange(next);
   }, [cameraState, controller]);
 
   useEffect(() => {
-    onCameraStateChange(
-      applyViewportCameraIntent(controller, {
-        cameraMode,
-        pointerMode,
-        selectedElementId,
-        nodePositions,
-      }),
-    );
-  }, [cameraMode, controller, nodePositions, onCameraStateChange, pointerMode, selectedElementId]);
+    const next = applyViewportCameraIntent(controller, {
+      cameraMode,
+      pointerMode,
+      selectedElementId,
+      nodePositions,
+    });
+    onDiagnosticEvent?.({
+      stage: "camera-intent",
+      ...viewportDiagnosticEnvironment(),
+      ...(selectedElementId ? { selectedElementId } : {}),
+      cameraPosition: [...next.position],
+      cameraTarget: [...next.target],
+      ...(next.attachedNodeId ? { cameraAttachedNodeId: next.attachedNodeId } : {}),
+    });
+    onCameraStateChange(next);
+  }, [
+    cameraMode,
+    controller,
+    nodePositions,
+    onCameraStateChange,
+    onDiagnosticEvent,
+    pointerMode,
+    selectedElementId,
+  ]);
 
   useEffect(() => {
     if (
@@ -171,21 +221,38 @@ export function ViewportCameraBridge({
       return;
     }
     lastTopologyFitKeyRef.current = topologyFit.key;
-    onCameraStateChange(
-      applyViewportTopologyFit(
-        controller,
-        topologyFit,
-        nodePositions,
-        size.height > 0 ? size.width / size.height : 1,
-        pointerMode,
-      ),
+    const aspect = size.height > 0 ? size.width / size.height : 1;
+    const next = applyViewportTopologyFit(
+      controller,
+      topologyFit,
+      nodePositions,
+      aspect,
+      pointerMode,
     );
+    onDiagnosticEvent?.({
+      stage: "topology-fit",
+      ...viewportDiagnosticEnvironment(),
+      ...(selectedElementId ? { selectedElementId } : {}),
+      topologyFitKey: topologyFit.key,
+      ...(topologyFit.targetElementId
+        ? { topologyFitTargetElementId: topologyFit.targetElementId }
+        : {}),
+      r3fWidth: size.width,
+      r3fHeight: size.height,
+      r3fAspect: aspect,
+      cameraPosition: [...next.position],
+      cameraTarget: [...next.target],
+      ...(next.attachedNodeId ? { cameraAttachedNodeId: next.attachedNodeId } : {}),
+    });
+    onCameraStateChange(next);
   }, [
     cameraMode,
     controller,
     nodePositions,
     onCameraStateChange,
+    onDiagnosticEvent,
     pointerMode,
+    selectedElementId,
     size.height,
     size.width,
     topologyFit,
@@ -312,6 +379,21 @@ export function ViewportCameraBridge({
 
     camera.position.set(...snapshot.position);
     camera.lookAt(...snapshot.target);
+    if (onDiagnosticEvent && diagnosticFrameCountRef.current < 12) {
+      diagnosticFrameCountRef.current += 1;
+      onDiagnosticEvent({
+        stage: "camera-frame",
+        ...viewportDiagnosticEnvironment(),
+        ...(selectedElementId ? { selectedElementId } : {}),
+        ...(topologyFit?.key ? { topologyFitKey: topologyFit.key } : {}),
+        r3fWidth: size.width,
+        r3fHeight: size.height,
+        r3fAspect: size.height > 0 ? size.width / size.height : 0,
+        cameraPosition: [...snapshot.position],
+        cameraTarget: [...snapshot.target],
+        ...(snapshot.attachedNodeId ? { cameraAttachedNodeId: snapshot.attachedNodeId } : {}),
+      });
+    }
     onCameraStateChange(snapshot);
   });
 

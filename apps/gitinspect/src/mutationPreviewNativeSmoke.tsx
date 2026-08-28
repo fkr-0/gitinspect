@@ -7,6 +7,7 @@ import type { RepositorySession } from "./services/repository";
 import { createTauriRepositoryService } from "./services/tauriRepository";
 import { GitMutationPreviewTray } from "./transactions/GitMutationPreviewTray";
 import type { GitMutationPreview } from "./transactions/gitMutationPreview";
+import type { ViewportDiagnosticEvent } from "./components/ViewportDiagnostics";
 import "./styles.css";
 
 interface FixtureMetadata {
@@ -205,6 +206,7 @@ async function measureHeadedMutationPreviewFrames() {
   const frameRenderer = String(
     gl.getParameter(debugInfo ? debugInfo.UNMASKED_RENDERER_WEBGL : gl.RENDERER),
   );
+  status("headed native focus handoff ready after GraphScene/WebGL convergence…");
 
   let frameVisibilityChanges = 0;
   let frameWindowFocusEvents = 0;
@@ -322,7 +324,11 @@ async function verifyHeadedTransformedTopologyAccessibility() {
     (commit) => commit.oid === selectedRewrite.newOid,
   );
   assert(selectedPreviewCommit, "headed accessibility fixture omitted selected transformed commit");
-  const authoritativeTransformedIds = preview.graphDelta.commits.map((commit) => `commit:${commit.oid}`);
+  const selectedTransformedId = `commit:${selectedRewrite.newOid}`;
+  const diagnostics: ViewportDiagnosticEvent[] = [];
+  const recordDiagnostic = (event: ViewportDiagnosticEvent) => {
+    if (diagnostics.length < 160) diagnostics.push(event);
+  };
   let selectedElementId: string | undefined = `commit:${selectedRewrite.oldOid}`;
   const render = () => {
     root.render(
@@ -331,6 +337,7 @@ async function verifyHeadedTransformedTopologyAccessibility() {
         selectedElementId={selectedElementId}
         search="Frame transition"
         mutationPreview={preview}
+        onDiagnosticEvent={recordDiagnostic}
         onSelect={(elementId) => {
           selectedElementId = elementId;
           render();
@@ -365,50 +372,81 @@ async function verifyHeadedTransformedTopologyAccessibility() {
     const buttons = [
       ...host.querySelectorAll<HTMLButtonElement>("button.viewport-node[data-mutation-affected]"),
     ];
-    for (const elementId of authoritativeTransformedIds) {
-      const button = buttons.find((candidate) => candidate.dataset.elementId === elementId);
-      if (button) return button;
-    }
-    return undefined;
+    return buttons.find((candidate) => candidate.dataset.elementId === selectedTransformedId);
   };
 
-  await waitFor(
-    "projected authoritative transformed node",
-    () => Boolean(projectedAuthoritativeButton()),
-    30_000,
-  );
-  const previewButton = projectedAuthoritativeButton();
-  assert(previewButton, "authoritative transformed node did not expose a projected button");
-  const projectedTransformedId = previewButton.dataset.elementId;
-  assert(projectedTransformedId, "projected authoritative transformed node omitted semantic identity");
-  previewButton.click();
-  await waitFor("transformed-node aria-pressed selection", () =>
-    [...host.querySelectorAll<HTMLButtonElement>('button.viewport-node[aria-pressed="true"]')].some(
-      (button) => button.dataset.elementId === projectedTransformedId,
-    ),
-  );
-  const frameAccessibilityPressed = true;
-
-  const rovingButtons = [...host.querySelectorAll<HTMLButtonElement>("button.viewport-node")];
-  const rovingTabStops = rovingButtons.filter((button) => button.tabIndex === 0);
-  const frameAccessibilityRoving =
-    rovingButtons.length >= 2 &&
-    rovingTabStops.length === 1 &&
-    rovingTabStops[0]?.getAttribute("aria-pressed") === "true" &&
-    rovingTabStops[0]?.dataset.elementId === projectedTransformedId;
-  assert(
-    frameAccessibilityRoving,
-    "selected authoritative transformed node did not own the single roving tab stop",
-  );
-
-  root.unmount();
-  host.remove();
-  return {
-    frameAccessibilityLive,
-    frameAccessibilityPressed,
-    frameAccessibilityRoving,
-    frameAccessibilityElementId: projectedTransformedId,
-  };
+  try {
+    await waitFor(
+      "projected selected authoritative transformed node",
+      () => Boolean(projectedAuthoritativeButton()),
+      30_000,
+    );
+    const previewButton = projectedAuthoritativeButton();
+    assert(previewButton, "selected authoritative transformed node did not expose a projected button");
+    const projectedTransformedId = previewButton.dataset.elementId;
+    assert(projectedTransformedId, "projected authoritative transformed node omitted semantic identity");
+    assert(
+      projectedTransformedId === selectedTransformedId,
+      "projected transformed node did not preserve effective selected semantic identity",
+    );
+    assert(
+      previewButton.getAttribute("aria-pressed") === "true",
+      "effective selected transformed node was projected without aria-pressed",
+    );
+    previewButton.click();
+    await waitFor("transformed-node aria-pressed selection", () =>
+      [...host.querySelectorAll<HTMLButtonElement>('button.viewport-node[aria-pressed="true"]')].some(
+        (button) => button.dataset.elementId === projectedTransformedId,
+      ),
+    );
+    const rovingButtons = [...host.querySelectorAll<HTMLButtonElement>("button.viewport-node")];
+    const rovingTabStops = rovingButtons.filter((button) => button.tabIndex === 0);
+    const frameAccessibilityRoving =
+      rovingButtons.length >= 2 &&
+      rovingTabStops.length === 1 &&
+      rovingTabStops[0]?.getAttribute("aria-pressed") === "true" &&
+      rovingTabStops[0]?.dataset.elementId === projectedTransformedId;
+    assert(
+      frameAccessibilityRoving,
+      "selected authoritative transformed node did not own the single roving tab stop",
+    );
+    const frameAccessibilityFocusStable =
+      diagnostics.length > 0 &&
+      diagnostics.every(
+        (event) => event.visibilityState === "visible" && event.documentHasFocus,
+      );
+    return {
+      frameAccessibilityLive,
+      frameAccessibilityPressed: true,
+      frameAccessibilityRoving,
+      frameAccessibilityElementId: projectedTransformedId,
+      frameAccessibilityBlocker: "",
+      frameAccessibilityVisibilityState: document.visibilityState,
+      frameAccessibilityDocumentHasFocus: document.hasFocus(),
+      frameAccessibilityFocusStable,
+      frameAccessibilityDiagnostics: JSON.stringify(diagnostics),
+    };
+  } catch (error: unknown) {
+    const frameAccessibilityFocusStable =
+      diagnostics.length > 0 &&
+      diagnostics.every(
+        (event) => event.visibilityState === "visible" && event.documentHasFocus,
+      );
+    return {
+      frameAccessibilityLive,
+      frameAccessibilityPressed: false,
+      frameAccessibilityRoving: false,
+      frameAccessibilityElementId: "",
+      frameAccessibilityBlocker: error instanceof Error ? error.message : String(error),
+      frameAccessibilityVisibilityState: document.visibilityState,
+      frameAccessibilityDocumentHasFocus: document.hasFocus(),
+      frameAccessibilityFocusStable,
+      frameAccessibilityDiagnostics: JSON.stringify(diagnostics),
+    };
+  } finally {
+    root.unmount();
+    host.remove();
+  }
 }
 
 async function stageSingleCommitRewrite(
@@ -486,6 +524,10 @@ interface SmokeReport {
   readonly frameAccessibilityRoving: boolean;
   readonly frameAccessibilityElementId: string;
   readonly frameAccessibilityBlocker: string;
+  readonly frameAccessibilityVisibilityState: string;
+  readonly frameAccessibilityDocumentHasFocus: boolean;
+  readonly frameAccessibilityFocusStable: boolean;
+  readonly frameAccessibilityDiagnostics: string;
 }
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -1002,7 +1044,6 @@ async function run(): Promise<void> {
   const frameEvidence = await measureHeadedMutationPreviewFrames();
   status("verifying headed transformed-topology accessibility semantics…");
   const accessibilityEvidence = await verifyHeadedTransformedTopologyAccessibility();
-  const frameAccessibilityBlocker = "";
   const report: SmokeReport = {
     passed: true,
     message:
@@ -1023,7 +1064,6 @@ async function run(): Promise<void> {
     eagerMaterializationCommandsRegistered: false,
     ...frameEvidence,
     ...accessibilityEvidence,
-    frameAccessibilityBlocker,
   };
   status(`PASS\n${JSON.stringify(report, null, 2)}`);
   await tauri.core.invoke<void>("mutation_preview_native_smoke_complete", { report });
@@ -1078,6 +1118,10 @@ void run().catch(async (error: unknown) => {
     frameAccessibilityRoving: false,
     frameAccessibilityElementId: "",
     frameAccessibilityBlocker: "native smoke failed before headed accessibility qualification",
+    frameAccessibilityVisibilityState: document.visibilityState,
+    frameAccessibilityDocumentHasFocus: document.hasFocus(),
+    frameAccessibilityFocusStable: false,
+    frameAccessibilityDiagnostics: "[]",
   };
   await tauri.core.invoke<void>("mutation_preview_native_smoke_complete", { report });
 });

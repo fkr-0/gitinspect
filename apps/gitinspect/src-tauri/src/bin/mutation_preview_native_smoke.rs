@@ -189,6 +189,7 @@ struct SmokeReport {
     frame_accessibility_roving: bool,
     frame_accessibility_element_id: String,
     frame_accessibility_blocker: String,
+    frame_accessibility_diagnostics: String,
 }
 
 #[tauri::command]
@@ -358,11 +359,17 @@ fn mutation_preview_native_smoke_complete(
                 report.frame_max_gap_document_has_focus
             ));
         }
-    } else if report.frame_samples != 0 {
+    } else {
         failures.push(format!(
-            "headed frame timing blocker was reported with unexpected samples: blocker={}, samples={}",
-            report.frame_timing_blocker, report.frame_samples
+            "headed frame timing blocker: {}",
+            report.frame_timing_blocker
         ));
+        if report.frame_samples != 0 {
+            failures.push(format!(
+                "headed frame timing blocker was reported with unexpected samples: blocker={}, samples={}",
+                report.frame_timing_blocker, report.frame_samples
+            ));
+        }
     }
     if !report.frame_accessibility_blocker.is_empty() {
         failures.push(format!(
@@ -701,6 +708,7 @@ fn format_report(report: &SmokeReport, failures: &[String]) -> String {
             "frame_accessibility_roving={}\n",
             "frame_accessibility_element_id={}\n",
             "frame_accessibility_blocker={}\n",
+            "frame_accessibility_diagnostics={}\n",
             "failures={}\n"
         ),
         if passed { "PASS" } else { "FAIL" },
@@ -748,6 +756,7 @@ fn format_report(report: &SmokeReport, failures: &[String]) -> String {
         report.frame_accessibility_roving,
         clean(&report.frame_accessibility_element_id),
         clean(&report.frame_accessibility_blocker),
+        clean(&report.frame_accessibility_diagnostics),
         failures
             .iter()
             .map(|failure| clean(failure))

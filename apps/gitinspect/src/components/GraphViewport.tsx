@@ -54,6 +54,10 @@ import {
   isInheritedCinematicCamera,
 } from "./gitCameraFit";
 import type { ViewportProjectionPoint } from "./ViewportProjectionBridge";
+import {
+  type ViewportDiagnosticHandler,
+  viewportDiagnosticEnvironment,
+} from "./ViewportDiagnostics";
 
 interface GraphViewportProps {
   readonly dataset: GraphDataset | undefined;
@@ -68,6 +72,7 @@ interface GraphViewportProps {
   readonly onSearchResultsChange?: (results: ViewportSearchResults) => void;
   readonly onSelect: (elementId: string, selection: SelectionState) => void;
   readonly onContextRequest?: (elementId: string, selection: SelectionState) => void;
+  readonly onDiagnosticEvent?: ViewportDiagnosticHandler;
 }
 
 export interface ViewportSearchResults {
@@ -358,7 +363,9 @@ export function GraphViewport({
   onSearchResultsChange,
   onSelect,
   onContextRequest,
+  onDiagnosticEvent,
 }: GraphViewportProps) {
+  const viewportRef = useRef<HTMLElement | null>(null);
   const viewportDataset = useMemo(
     () => mutationPreviewGraphDataset(dataset, mutationPreview),
     [dataset, mutationPreview],
@@ -746,9 +753,47 @@ export function GraphViewport({
     ? `Mutation preview ${mutationPreview.success ? "succeeded" : "has conflicts"}; ${mutationPreview.graphDelta.commits.length} authoritative transformed commit node${mutationPreview.graphDelta.commits.length === 1 ? "" : "s"}; ${visibleMutationAffectedCount} visible graph node${visibleMutationAffectedCount === 1 ? "" : "s"} affected.`
     : "No mutation preview active.";
   const canRenderCanvas = typeof window !== "undefined";
+  const authoritativeTransformedIds = useMemo(
+    () => mutationPreview?.graphDelta.commits.map((commit) => `commit:${commit.oid}`) ?? [],
+    [mutationPreview],
+  );
+  useEffect(() => {
+    if (!onDiagnosticEvent) return;
+    const rect = viewportRef.current?.getBoundingClientRect();
+    const canvas = viewportRef.current?.querySelector<HTMLCanvasElement>(".viewport__canvas canvas");
+    const canvasRect = canvas?.getBoundingClientRect();
+    onDiagnosticEvent({
+      stage: "viewport-render",
+      ...viewportDiagnosticEnvironment(),
+      ...(effectiveSelectedElementId ? { selectedElementId: effectiveSelectedElementId } : {}),
+      authoritativeTransformedIds: authoritativeTransformedIds.slice(0, 48),
+      projectedLabelIds: projectedLabelIds.slice(0, 48),
+      ...(topologyFit?.key ? { topologyFitKey: topologyFit.key } : {}),
+      ...(topologyFit?.targetElementId
+        ? { topologyFitTargetElementId: topologyFit.targetElementId }
+        : {}),
+      ...(rect ? { viewportWidth: rect.width, viewportHeight: rect.height } : {}),
+      ...(canvasRect ? { canvasWidth: canvasRect.width, canvasHeight: canvasRect.height } : {}),
+      projectionPointCount: projectedLabelPoints.size,
+      visibleProjectionCount: [...projectedLabelPoints.values()].filter((point) => point.visible).length,
+      projectionPointIds: [...projectedLabelPoints.keys()].slice(0, 48),
+      visibleProjectionIds: [...projectedLabelPoints]
+        .filter(([, point]) => point.visible)
+        .map(([id]) => id)
+        .slice(0, 48),
+    });
+  }, [
+    authoritativeTransformedIds,
+    effectiveSelectedElementId,
+    onDiagnosticEvent,
+    projectedLabelIds,
+    projectedLabelPoints,
+    topologyFit,
+  ]);
 
   return (
     <section
+      ref={viewportRef}
       className="viewport"
       aria-label="3D graph viewport"
       aria-describedby="viewport-keyboard-instructions viewport-selection-status viewport-mutation-status"
@@ -790,6 +835,7 @@ export function GraphViewport({
             {...(topologyFit === undefined ? {} : { topologyFit })}
             onCameraStateChange={handleCameraStateChange}
             onProjectionChange={setProjectedLabelPoints}
+            {...(onDiagnosticEvent ? { onDiagnosticEvent } : {})}
             {...(semanticInteractionEnabled
               ? {
                   nodeInteraction: {

@@ -2,6 +2,10 @@ import { useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import type { ElementId, Vec3 } from "@gitinspect/graph-elements";
 import { Vector3, type Camera } from "three";
+import {
+  type ViewportDiagnosticHandler,
+  viewportDiagnosticEnvironment,
+} from "./ViewportDiagnostics";
 
 const PROJECTION_EPSILON_PERCENT = 0.05;
 
@@ -18,6 +22,7 @@ interface ViewportProjectionBridgeProps {
   readonly onProjectionChange: (
     points: ReadonlyMap<ElementId, ViewportProjectionPoint>,
   ) => void;
+  readonly onDiagnosticEvent?: ViewportDiagnosticHandler;
 }
 
 /** Project the one authoritative GraphWorld coordinate through the active Three camera. */
@@ -68,9 +73,11 @@ export function ViewportProjectionBridge({
   elementIds,
   nodePositions,
   onProjectionChange,
+  onDiagnosticEvent,
 }: ViewportProjectionBridgeProps) {
-  const { camera } = useThree();
+  const { camera, size } = useThree();
   const previousRef = useRef<ReadonlyMap<ElementId, ViewportProjectionPoint>>(new Map());
+  const diagnosticFrameCountRef = useRef(0);
 
   useFrame(() => {
     // ViewportCameraBridge mutates the active camera in-frame; refresh its world matrix before
@@ -82,8 +89,38 @@ export function ViewportProjectionBridge({
       if (!position) continue;
       next.set(id, projectWorldPosition(position, camera));
     }
+    const visibleIds = [...next].filter(([, point]) => point.visible).map(([id]) => id);
+    if (onDiagnosticEvent && diagnosticFrameCountRef.current < 12) {
+      diagnosticFrameCountRef.current += 1;
+      onDiagnosticEvent({
+        stage: "projection-frame",
+        ...viewportDiagnosticEnvironment(),
+        projectedLabelIds: elementIds.slice(0, 48),
+        r3fWidth: size.width,
+        r3fHeight: size.height,
+        r3fAspect: size.height > 0 ? size.width / size.height : 0,
+        cameraPosition: [camera.position.x, camera.position.y, camera.position.z],
+        projectionPointCount: next.size,
+        visibleProjectionCount: visibleIds.length,
+        projectionPointIds: [...next.keys()].slice(0, 48),
+        visibleProjectionIds: visibleIds.slice(0, 48),
+      });
+    }
     if (sameViewportProjection(previousRef.current, next)) return;
     previousRef.current = next;
+    onDiagnosticEvent?.({
+      stage: "projection-publish",
+      ...viewportDiagnosticEnvironment(),
+      projectedLabelIds: elementIds.slice(0, 48),
+      r3fWidth: size.width,
+      r3fHeight: size.height,
+      r3fAspect: size.height > 0 ? size.width / size.height : 0,
+      cameraPosition: [camera.position.x, camera.position.y, camera.position.z],
+      projectionPointCount: next.size,
+      visibleProjectionCount: visibleIds.length,
+      projectionPointIds: [...next.keys()].slice(0, 48),
+      visibleProjectionIds: visibleIds.slice(0, 48),
+    });
     onProjectionChange(next);
   });
 
