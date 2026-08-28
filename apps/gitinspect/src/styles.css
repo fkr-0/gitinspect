@@ -731,6 +731,16 @@ select:focus-visible {
   color: var(--accent-strong);
 }
 
+.viewport-node[data-mutation-affected] {
+  z-index: 6;
+  filter: drop-shadow(0 0 8px rgba(255, 79, 216, 0.72));
+}
+
+.viewport-node[data-mutation-affected] .viewport-node__label {
+  color: #ff9ae7;
+  text-shadow: 0 0 10px rgba(255, 79, 216, 0.58), 0 1px 6px #080b0f;
+}
+
 .viewport-node:focus-visible {
   outline: 2px solid var(--accent-strong);
   outline-offset: 4px;

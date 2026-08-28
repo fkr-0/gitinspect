@@ -39,6 +39,11 @@ import { buildGitTopologyContext, type GitTopologyContext } from "../domain/gitT
 import { gitEdgeStyleRegistry } from "../domain/gitVisualTheme";
 import { GitWorldScaleSearchAdapter } from "../scale";
 import { createSearchHighlightMapper, type GitSearchFilters } from "../search";
+import type { GitMutationPreview } from "../transactions/gitMutationPreview";
+import {
+  createMutationPreviewMapper,
+  gitMutationPreviewAffectedIds,
+} from "../transactions/mutationPreviewVisual";
 import type { ViewportTopologyFitRequest } from "./ViewportCameraBridge";
 import {
   contextualGitCameraBounds,
@@ -56,6 +61,7 @@ interface GraphViewportProps {
   readonly cameraMode?: CameraMode;
   readonly pointerMode?: MouseMode;
   readonly cameraState?: CameraState;
+  readonly mutationPreview?: GitMutationPreview;
   readonly onCameraStateChange?: (camera: CameraState) => void;
   readonly onSearchResultsChange?: (results: ViewportSearchResults) => void;
   readonly onSelect: (elementId: string, selection: SelectionState) => void;
@@ -345,6 +351,7 @@ export function GraphViewport({
   cameraMode = "attached",
   pointerMode = "cursor",
   cameraState = INITIAL_CAMERA_STATE,
+  mutationPreview,
   onCameraStateChange,
   onSearchResultsChange,
   onSelect,
@@ -670,9 +677,20 @@ export function GraphViewport({
     () => createGitVisualMapper(undefined, topologyContext),
     [topologyContext],
   );
-  const mapper = useMemo(
+  const searchMapper = useMemo(
     () => (model ? createSearchHighlightMapper(topologyMapper, model.highlights) : topologyMapper),
     [model, topologyMapper],
+  );
+  const mutationAffectedIds = useMemo(
+    () => gitMutationPreviewAffectedIds(mutationPreview),
+    [mutationPreview],
+  );
+  const mapper = useMemo(
+    () =>
+      mutationAffectedIds.size > 0
+        ? createMutationPreviewMapper(searchMapper, mutationAffectedIds)
+        : searchMapper,
+    [mutationAffectedIds, searchMapper],
   );
   const tooltipNode = dataset?.nodes.find((node) => node.id === tooltipRecord?.elementId);
   const tooltipEdge = dataset?.edges.find((edge) => edge.id === tooltipRecord?.elementId);
@@ -695,13 +713,19 @@ export function GraphViewport({
     : selectedElementId
       ? `Selected ${selectedElementId}.`
       : "No graph node selected.";
+  const visibleMutationAffectedCount = dataset
+    ? dataset.nodes.reduce((count, node) => count + (mutationAffectedIds.has(node.id) ? 1 : 0), 0)
+    : 0;
+  const mutationAccessibleSummary = mutationPreview
+    ? `Mutation preview ${mutationPreview.success ? "succeeded" : "has conflicts"}; ${visibleMutationAffectedCount} visible graph node${visibleMutationAffectedCount === 1 ? "" : "s"} affected.`
+    : "No mutation preview active.";
   const canRenderCanvas = typeof window !== "undefined";
 
   return (
     <section
       className="viewport"
       aria-label="3D graph viewport"
-      aria-describedby="viewport-keyboard-instructions viewport-selection-status"
+      aria-describedby="viewport-keyboard-instructions viewport-selection-status viewport-mutation-status"
       data-testid="graph-viewport"
       data-camera-mode={cameraMode}
       data-pointer-mode={pointerMode}
@@ -712,6 +736,9 @@ export function GraphViewport({
       </p>
       <p id="viewport-selection-status" className="sr-only" role="status" aria-live="polite">
         {selectedAccessibleSummary}
+      </p>
+      <p id="viewport-mutation-status" className="sr-only" role="status" aria-live="polite">
+        {mutationAccessibleSummary}
       </p>
       {renderDataset && nodePositions && canRenderCanvas && cameraControllerRef.current && (
         <Suspense
@@ -795,6 +822,7 @@ export function GraphViewport({
         const logicalElementId = resolveViewportSelection(node.id, aggregateDrillTargets);
         const selected = logicalElementId === selectedElementId;
         const hovered = logicalElementId === hoveredElementId;
+        const mutationAffected = mutationAffectedIds.has(logicalElementId) || mutationAffectedIds.has(node.id);
         const matches =
           normalizedSearch.length === 0 || model?.highlights.hitIds.has(logicalElementId) === true;
         const style = {
@@ -815,11 +843,12 @@ export function GraphViewport({
             tabIndex={node.id === rovingTabStopId ? 0 : -1}
             data-selected={selected || undefined}
             data-hovered={hovered || undefined}
+            data-mutation-affected={mutationAffected || undefined}
             data-muted={!matches || undefined}
             data-label-side={viewportLabelSide(projected.x)}
             aria-disabled={!semanticInteractionEnabled || undefined}
             aria-pressed={selected}
-            aria-label={`${node.label ?? node.id}, ${node.kind}${selected ? ", selected" : ""}`}
+            aria-label={`${node.label ?? node.id}, ${node.kind}${selected ? ", selected" : ""}${mutationAffected ? ", affected by mutation preview" : ""}`}
             style={style}
             onPointerEnter={() =>
               hoverSemanticIdentity(

@@ -55,6 +55,7 @@ export interface GitMutationPreviewTrayProps {
   readonly selectedCommitOid?: string;
   readonly bridge?: GitMutationPreviewBridge;
   readonly onDraftCountChange?: (count: number) => void;
+  readonly onPreviewChange?: (preview: GitMutationPreview | undefined) => void;
 }
 
 export interface GitMutationPreviewRequest {
@@ -66,6 +67,55 @@ export interface GitMutationPreviewRequest {
 interface StagedMutationOperation {
   readonly id: number;
   readonly operation: GitMutationPreviewOperation;
+}
+
+export interface GitMutationDraftHistory<T> {
+  readonly past: readonly (readonly T[])[];
+  readonly present: readonly T[];
+  readonly future: readonly (readonly T[])[];
+}
+
+const MAX_GIT_MUTATION_DRAFT_HISTORY = 64;
+
+export function createGitMutationDraftHistory<T>(
+  present: readonly T[] = [],
+): GitMutationDraftHistory<T> {
+  return { past: [], present: [...present], future: [] };
+}
+
+export function commitGitMutationDraftHistory<T>(
+  history: GitMutationDraftHistory<T>,
+  present: readonly T[],
+): GitMutationDraftHistory<T> {
+  return {
+    past: [...history.past, history.present].slice(-MAX_GIT_MUTATION_DRAFT_HISTORY),
+    present: [...present],
+    future: [],
+  };
+}
+
+export function undoGitMutationDraftHistory<T>(
+  history: GitMutationDraftHistory<T>,
+): GitMutationDraftHistory<T> {
+  const previous = history.past.at(-1);
+  if (!previous) return history;
+  return {
+    past: history.past.slice(0, -1),
+    present: previous,
+    future: [history.present, ...history.future].slice(0, MAX_GIT_MUTATION_DRAFT_HISTORY),
+  };
+}
+
+export function redoGitMutationDraftHistory<T>(
+  history: GitMutationDraftHistory<T>,
+): GitMutationDraftHistory<T> {
+  const next = history.future[0];
+  if (!next) return history;
+  return {
+    past: [...history.past, history.present].slice(-MAX_GIT_MUTATION_DRAFT_HISTORY),
+    present: next,
+    future: history.future.slice(1),
+  };
 }
 
 function normalizeRefName(value: string, label: string): string {
@@ -480,6 +530,7 @@ export function GitMutationPreviewTray({
   selectedCommitOid,
   bridge,
   onDraftCountChange,
+  onPreviewChange,
 }: GitMutationPreviewTrayProps) {
   const controllerRef = useRef<GitMutationPreviewTrayController | undefined>(undefined);
   controllerRef.current ??= new GitMutationPreviewTrayController();
@@ -491,8 +542,12 @@ export function GitMutationPreviewTray({
   const [targetOid, setTargetOid] = useState("");
   const [commitOid, setCommitOid] = useState("");
   const [commitOidsText, setCommitOidsText] = useState("");
-  const [staged, setStaged] = useState<readonly StagedMutationOperation[]>([]);
+  const [stagedHistory, setStagedHistory] = useState(() =>
+    createGitMutationDraftHistory<StagedMutationOperation>(),
+  );
+  const staged = stagedHistory.present;
   const [ui, setUi] = useState<PreviewUiState>({ status: "idle" });
+  const [announcement, setAnnouncement] = useState("Mutation draft ready.");
   const nextDraftIdRef = useRef(1);
   const repositoryIdentity = session?.key ?? "no-session";
   const previousRepositoryIdentityRef = useRef(repositoryIdentity);
@@ -507,7 +562,7 @@ export function GitMutationPreviewTray({
   useEffect(() => {
     if (previousRepositoryIdentityRef.current !== repositoryIdentity) {
       previousRepositoryIdentityRef.current = repositoryIdentity;
-      setStaged([]);
+      setStagedHistory(createGitMutationDraftHistory());
       setName("");
       setNewName("");
       setTargetOid("");
@@ -516,20 +571,23 @@ export function GitMutationPreviewTray({
     }
     if (previewContextIdentity.length > 0) {
       setUi({ status: "idle" });
+      onPreviewChange?.(undefined);
       void controller.reset();
     }
-  }, [controller, previewContextIdentity, repositoryIdentity]);
+  }, [controller, onPreviewChange, previewContextIdentity, repositoryIdentity]);
 
   useEffect(
     () => () => {
       void controller.reset();
       onDraftCountChange?.(0);
+      onPreviewChange?.(undefined);
     },
-    [controller, onDraftCountChange],
+    [controller, onDraftCountChange, onPreviewChange],
   );
 
   const invalidatePreview = () => {
     if (ui.status !== "idle") setUi({ status: "idle" });
+    onPreviewChange?.(undefined);
     void controller.reset();
   };
 
@@ -565,7 +623,10 @@ export function GitMutationPreviewTray({
     if (!session || !operation || staged.length >= MAX_GIT_MUTATION_PREVIEW_OPERATIONS) return;
     invalidatePreview();
     const id = nextDraftIdRef.current++;
-    setStaged((current) => [...current, { id, operation }]);
+    setStagedHistory((current) =>
+      commitGitMutationDraftHistory(current, [...current.present, { id, operation }]),
+    );
+    setAnnouncement(`Staged ${gitMutationPreviewOperationSummary(operation)}.`);
     setName("");
     setNewName("");
     setTargetOid("");
@@ -576,18 +637,39 @@ export function GitMutationPreviewTray({
   const moveOperation = (fromIndex: number, toIndex: number) => {
     if (toIndex < 0 || toIndex >= staged.length || fromIndex === toIndex) return;
     invalidatePreview();
-    setStaged((current) => {
-      const next = [...current];
+    setStagedHistory((current) => {
+      const next = [...current.present];
       const [entry] = next.splice(fromIndex, 1);
       if (!entry) return current;
       next.splice(toIndex, 0, entry);
-      return next;
+      return commitGitMutationDraftHistory(current, next);
     });
+    setAnnouncement(`Moved mutation operation ${fromIndex + 1} to position ${toIndex + 1}.`);
   };
 
   const removeOperation = (index: number) => {
     invalidatePreview();
-    setStaged((current) => current.filter((_, currentIndex) => currentIndex !== index));
+    setStagedHistory((current) =>
+      commitGitMutationDraftHistory(
+        current,
+        current.present.filter((_, currentIndex) => currentIndex !== index),
+      ),
+    );
+    setAnnouncement(`Removed mutation operation ${index + 1}.`);
+  };
+
+  const undoDraft = () => {
+    if (stagedHistory.past.length === 0 || ui.status === "loading") return;
+    invalidatePreview();
+    setStagedHistory((current) => undoGitMutationDraftHistory(current));
+    setAnnouncement("Undid the last mutation draft change.");
+  };
+
+  const redoDraft = () => {
+    if (stagedHistory.future.length === 0 || ui.status === "loading") return;
+    invalidatePreview();
+    setStagedHistory((current) => redoGitMutationDraftHistory(current));
+    setAnnouncement("Redid the mutation draft change.");
   };
 
   const operations = staged.map((entry) => entry.operation);
@@ -613,9 +695,19 @@ export function GitMutationPreviewTray({
         bridge: nativeBridge,
         operations,
       });
-      if (preview) setUi({ status: "ready", preview });
+      if (preview) {
+        setUi({ status: "ready", preview });
+        onPreviewChange?.(preview);
+        setAnnouncement(
+          preview.success
+            ? `Mutation preview succeeded with ${preview.changedRefs.length} ref changes and ${preview.rewrittenCommits.length} rewritten commits.`
+            : `Mutation preview has ${preview.failures.length} conflict or validation failures.`,
+        );
+      }
     } catch (error) {
+      onPreviewChange?.(undefined);
       setUi({ status: "error", message: failureMessage(error) });
+      setAnnouncement(`Mutation preview failed: ${failureMessage(error)}`);
     }
   };
 
@@ -625,13 +717,19 @@ export function GitMutationPreviewTray({
     try {
       await controller.confirm(session.snapshot.revision);
       setUi({ status: "confirmed", preview });
+      onPreviewChange?.(preview);
+      setAnnouncement("Disposable mutation preview confirmed; repository apply remains unavailable.");
     } catch (error) {
+      onPreviewChange?.(undefined);
       setUi({ status: "error", message: failureMessage(error) });
+      setAnnouncement(`Mutation preview confirmation failed: ${failureMessage(error)}`);
     }
   };
 
   const clearPreview = () => {
     setUi({ status: "idle" });
+    onPreviewChange?.(undefined);
+    setAnnouncement("Mutation preview cleared.");
     void controller.reset();
   };
 
@@ -779,6 +877,9 @@ export function GitMutationPreviewTray({
           {staged.length} / {MAX_GIT_MUTATION_PREVIEW_OPERATIONS} operations staged. Backend hard
           cap: 64 operations.
         </p>
+        <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          {announcement}
+        </p>
         <GitMutationPreviewOperationList
           items={staged}
           disabled={ui.status === "loading"}
@@ -807,12 +908,30 @@ export function GitMutationPreviewTray({
         <button
           type="button"
           className="button button--ghost"
+          disabled={stagedHistory.past.length === 0 || ui.status === "loading"}
+          onClick={undoDraft}
+          aria-label="Undo last mutation draft change"
+        >
+          Undo draft
+        </button>
+        <button
+          type="button"
+          className="button button--ghost"
+          disabled={stagedHistory.future.length === 0 || ui.status === "loading"}
+          onClick={redoDraft}
+          aria-label="Redo mutation draft change"
+        >
+          Redo draft
+        </button>
+        <button
+          type="button"
+          className="button button--ghost"
           disabled={!canPreview}
           onClick={() => void previewDraft()}
         >
           {ui.status === "loading" ? "Previewing…" : "Preview ordered operations"}
         </button>
-        {ui.status === "ready" && (
+        {ui.status === "ready" && ui.preview.success && (
           <button
             type="button"
             className="button button--ghost"

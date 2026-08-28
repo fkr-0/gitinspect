@@ -214,7 +214,6 @@ export type MutationKind =
   | "branch-create"
   | "branch-delete"
   | "branch-rename"
-  | "checkout"
   | "tag-create"
   | "tag-delete"
   | "tag-move"

@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RepositorySession } from "../services/repository";
 import {
+  commitGitMutationDraftHistory,
+  createGitMutationDraftHistory,
   GitMutationPreviewOperationList,
   GitMutationPreviewResult,
   GitMutationPreviewTray,
@@ -12,6 +14,8 @@ import {
   gitMutationPreviewOperation,
   MAX_GIT_MUTATION_PREVIEW_OPERATIONS,
   MAX_GIT_MUTATION_PREVIEW_REWRITE_COMMITS,
+  redoGitMutationDraftHistory,
+  undoGitMutationDraftHistory,
 } from "./GitMutationPreviewTray";
 import type {
   GitMutationPreview,
@@ -86,6 +90,27 @@ function bridge(): GitMutationPreviewBridge & {
 }
 
 describe("GitMutationPreviewTray", () => {
+  it("keeps bounded draft undo/redo history and clears redo after a new edit", () => {
+    const first = { kind: "branch-delete", name: "topic/old" } as const;
+    const second = { kind: "tag-delete", name: "v-old" } as const;
+    const third = { kind: "cherry-pick", commitOid: "a".repeat(40) } as const;
+    let history = createGitMutationDraftHistory<GitMutationPreviewOperation>();
+    history = commitGitMutationDraftHistory(history, [first]);
+    history = commitGitMutationDraftHistory(history, [first, second]);
+
+    history = undoGitMutationDraftHistory(history);
+    expect(history.present).toEqual([first]);
+    expect(history.future).toEqual([[first, second]]);
+
+    history = redoGitMutationDraftHistory(history);
+    expect(history.present).toEqual([first, second]);
+
+    history = undoGitMutationDraftHistory(history);
+    history = commitGitMutationDraftHistory(history, [first, third]);
+    expect(history.present).toEqual([first, third]);
+    expect(history.future).toEqual([]);
+  });
+
   it("validates and normalizes every bounded ref/rewrite draft without path or argv authority", () => {
     expect(
       gitMutationPreviewOperation("branch-create", {
@@ -380,6 +405,9 @@ describe("GitMutationPreviewTray", () => {
     expect(html).toContain("Squash branch commits");
     expect(html).toContain("Fixup branch commits");
     expect(html).toContain("Backend hard cap: 64 operations");
+    expect(html).toContain("Undo draft");
+    expect(html).toContain("Redo draft");
+    expect(html).toContain('aria-live="polite"');
     expect(html).toContain("Preview ordered operations");
     expect(html).toContain("Apply to repository");
     expect(html).toContain("disabled");

@@ -39,6 +39,7 @@ import {
 } from "./state/selectionUrl";
 import { initialStudioState, studioReducer } from "./state/studio";
 import { GitMutationPreviewTray } from "./transactions/GitMutationPreviewTray";
+import type { GitMutationPreview } from "./transactions/gitMutationPreview";
 
 interface AppProps {
   readonly repositoryService?: RepositoryService;
@@ -660,6 +661,7 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
   const [contextElementId, setContextElementId] = useState<string | undefined>();
   const [viewportSelection, setViewportSelection] = useState<SelectionState | undefined>();
   const [mutationDraftCount, setMutationDraftCount] = useState(0);
+  const [mutationPreview, setMutationPreview] = useState<GitMutationPreview | undefined>();
   const captureViewportCamera = useCallback((camera: CameraState) => {
     viewportCameraRef.current = camera;
   }, []);
@@ -1680,6 +1682,7 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
           dataset={activeDataset}
           selectedElementId={viewportSelectedElementId}
           search={state.search}
+          {...(mutationPreview === undefined ? {} : { mutationPreview })}
           {...(navigationDepth === 0 && activeSearchFilterCount > 0
             ? { filters: state.searchFilters }
             : {})}
@@ -2069,6 +2072,7 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
         session={state.session}
         {...(selectedCommitOid === undefined ? {} : { selectedCommitOid })}
         onDraftCountChange={setMutationDraftCount}
+        onPreviewChange={setMutationPreview}
       />
 
       <footer className="statusbar">

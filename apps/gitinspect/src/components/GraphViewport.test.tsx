@@ -168,7 +168,10 @@ describe("GraphViewport Phase-5 projection wiring", () => {
 
     expect(html).toContain("rendered / 3 logical elements");
     expect(html).toContain("topology-derived Git Railfield · camera-projected labels");
-    expect(html).toContain('aria-describedby="viewport-keyboard-instructions viewport-selection-status"');
+    expect(html).toContain(
+      'aria-describedby="viewport-keyboard-instructions viewport-selection-status viewport-mutation-status"',
+    );
+    expect(html).toContain("No mutation preview active.");
     expect(html).toContain("Use arrow keys to move between visible graph nodes.");
     expect(html).toContain("Selected alpha, commit.");
     expect(html).not.toContain("viewport-node__core");
