@@ -13,6 +13,7 @@ import {
   gitMutationPreviewDraftPresentation,
   gitMutationPreviewOperation,
   MAX_GIT_MUTATION_PREVIEW_OPERATIONS,
+  MAX_GIT_MUTATION_PREVIEW_REWORD_MESSAGE_BYTES,
   MAX_GIT_MUTATION_PREVIEW_REWRITE_COMMITS,
   redoGitMutationDraftHistory,
   undoGitMutationDraftHistory,
@@ -62,6 +63,8 @@ function preview(
     changedRefs: [{ name: "refs/heads/topic", afterOid: "c".repeat(40) }],
     rewrittenCommits: [],
     hashCascade: [],
+    droppedCommits: [],
+    graphDelta: { commits: [], refs: [], truncated: false },
     warnings: [],
     failures: [],
     success: true,
@@ -93,7 +96,12 @@ describe("GitMutationPreviewTray", () => {
   it("keeps bounded draft undo/redo history and clears redo after a new edit", () => {
     const first = { kind: "branch-delete", name: "topic/old" } as const;
     const second = { kind: "tag-delete", name: "v-old" } as const;
-    const third = { kind: "cherry-pick", commitOid: "a".repeat(40) } as const;
+    const third = {
+      kind: "reword",
+      branch: "topic/rewrite",
+      commitOid: "a".repeat(40),
+      message: "replacement subject",
+    } as const;
     let history = createGitMutationDraftHistory<GitMutationPreviewOperation>();
     history = commitGitMutationDraftHistory(history, [first]);
     history = commitGitMutationDraftHistory(history, [first, second]);
@@ -177,6 +185,30 @@ describe("GitMutationPreviewTray", () => {
       }),
     ).toMatchObject({ kind: "fixup", commitOids: ["c".repeat(40), "d".repeat(40)] });
     expect(
+      gitMutationPreviewOperation("reword", {
+        branch: " topic/rewrite ",
+        commitOid: "E".repeat(40),
+        message: "  replacement subject  ",
+      }),
+    ).toEqual({
+      kind: "reword",
+      branch: "topic/rewrite",
+      commitOid: "e".repeat(40),
+      message: "replacement subject",
+    });
+    expect(
+      gitMutationPreviewOperation("drop", {
+        branch: "topic/rewrite",
+        commitOid: "F".repeat(40),
+      }),
+    ).toEqual({ kind: "drop", branch: "topic/rewrite", commitOid: "f".repeat(40) });
+    expect(
+      gitMutationPreviewOperation("split", {
+        branch: "topic/rewrite",
+        commitOid: "A".repeat(40),
+      }),
+    ).toEqual({ kind: "split", branch: "topic/rewrite", commitOid: "a".repeat(40) });
+    expect(
       gitMutationPreviewCommitOidList(`${"c".repeat(40)}\n${"d".repeat(40)}, ${"e".repeat(40)}`),
     ).toEqual(["c".repeat(40), "d".repeat(40), "e".repeat(40)]);
 
@@ -240,6 +272,30 @@ describe("GitMutationPreviewTray", () => {
         ),
       }),
     ).toThrow(`limited to ${MAX_GIT_MUTATION_PREVIEW_REWRITE_COMMITS}`);
+    expect(() =>
+      gitMutationPreviewOperation("reword", {
+        branch: "topic/rewrite",
+        commitOid: "a".repeat(40),
+        message: "   ",
+      }),
+    ).toThrow("replacement commit message");
+    expect(() =>
+      gitMutationPreviewOperation("reword", {
+        branch: "topic/rewrite",
+        commitOid: "a".repeat(40),
+        message: "replacement\0body",
+      }),
+    ).toThrow("cannot contain NUL");
+    expect(() =>
+      gitMutationPreviewOperation("reword", {
+        branch: "topic/rewrite",
+        commitOid: "a".repeat(40),
+        message: "é".repeat(MAX_GIT_MUTATION_PREVIEW_REWORD_MESSAGE_BYTES / 2 + 1),
+      }),
+    ).toThrow(`limited to ${MAX_GIT_MUTATION_PREVIEW_REWORD_MESSAGE_BYTES} bytes`);
+    expect(() =>
+      gitMutationPreviewOperation("drop", { branch: "topic/rewrite", commitOid: "deadbeef" }),
+    ).toThrow("full hexadecimal");
   });
 
   it("defines operation-specific authoring labels for ref and rewrite operation kinds", () => {
@@ -265,6 +321,13 @@ describe("GitMutationPreviewTray", () => {
     });
     expect(gitMutationPreviewDraftPresentation("squash").commitListLabel).toContain("branch order");
     expect(gitMutationPreviewDraftPresentation("fixup").commitListLabel).toContain("branch order");
+    expect(gitMutationPreviewDraftPresentation("reword")).toMatchObject({
+      primaryLabel: "Branch name",
+      commitLabel: "Commit object ID",
+      messageLabel: "Replacement commit message",
+    });
+    expect(gitMutationPreviewDraftPresentation("drop").commitLabel).toContain("drop");
+    expect(gitMutationPreviewDraftPresentation("split").commitLabel).toContain("split");
   });
 
   it("previews multiple operations in the exact staged order and confirms only the preview proof", async () => {
@@ -404,6 +467,9 @@ describe("GitMutationPreviewTray", () => {
     expect(html).toContain("Reorder branch commits");
     expect(html).toContain("Squash branch commits");
     expect(html).toContain("Fixup branch commits");
+    expect(html).toContain("Reword commit");
+    expect(html).toContain("Drop commit");
+    expect(html).toContain("Split commit deterministically");
     expect(html).toContain("Backend hard cap: 64 operations");
     expect(html).toContain("Undo draft");
     expect(html).toContain("Redo draft");
