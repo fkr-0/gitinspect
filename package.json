@@ -12,7 +12,8 @@
     "lint:fix": "biome lint --write .",
     "check": "pnpm typecheck && pnpm test && pnpm build",
     "release:verify": "bash scripts/release-check.sh --verify",
-    "release:candidate": "bash scripts/release-check.sh --candidate"
+    "release:candidate": "bash scripts/release-check.sh --candidate",
+    "release:native-qualify": "bash scripts/native-release-qualification.sh"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.10",

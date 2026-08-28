@@ -26,6 +26,10 @@ commands:
     run: [pnpm, release:verify]
     category: test
     timeoutMs: 600000
+  release-native-qualify:
+    run: [pnpm, release:native-qualify]
+    category: test
+    timeoutMs: 600000
 agent:
   notes: >-
     Preserve unrelated changes, never write to bare /tmp, coordinate concurrent writes with

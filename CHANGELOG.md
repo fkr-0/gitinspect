@@ -27,4 +27,5 @@
 - Git Railfield topology visualization with one authoritative camera projection, fitted repository/selection framing, explicit branch peel/merge convergence, local ref/HEAD attachments, topology-aware labels/LOD, and release-gate browser evidence for the synthetic adapter provenance.
 - Phase-6 release verification tooling and CI parity: one local `release:verify` gate spans TypeScript, Rust core, Tauri, lint/build/tests and diff-check, while candidate mode fails closed on incomplete package/bundle/changelog metadata.
 - Release compatibility matrix documenting qualified Linux worktree, git-dir, linked-worktree, bare, HEAD-state, refs/tags/stash/remotes, bounded diff/content, native watch/refresh, and scale behavior while keeping packaged macOS/Windows support explicitly unclaimed.
+- Fail-closed native release/operator qualification for Linux i3/X11: proves an unused controlled workspace, rejects competing headed Gitinspect runners, waits for the exact WebGL-convergence marker, permits one external Tauri handoff, records active-window/focus/selection provenance, and requires at least three unchanged strict native passes.
 

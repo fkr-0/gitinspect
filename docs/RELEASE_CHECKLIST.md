@@ -23,6 +23,14 @@ pnpm release:verify
 
 This runs the complete TypeScript build/test/typecheck/lint matrix, Rust core fmt/clippy/tests, Tauri fmt/clippy/tests/check, and `git diff --check`. It also reports release-candidate metadata that is not yet satisfied without turning those development-state warnings into false regression failures.
 
+For the Linux i3/X11 native GPU/projection qualification lane, also use:
+
+```sh
+pnpm release:native-qualify
+```
+
+That operator gate is deliberately environment-sensitive and fail-closed. It creates only a previously absent controlled i3 workspace, refuses to reuse/steal an existing workspace, rejects competing native/cargo/browser-headed Gitinspect runners, waits for the exact native GraphScene/WebGL convergence marker, permits at most one external Tauri handoff per run, records X11 active-window/window-class/workspace plus strict native focus/selection evidence, and requires at least three serialized green runs. It restores the operator's original workspace afterward. Browser hardware-WebGL remains supplemental (`nativeFpsClaim=false`), and AT-SPI/native accessibility-tree qualification remains a separate read-only boundary.
+
 When preparing an actual candidate, use:
 
 ```sh
@@ -75,5 +83,6 @@ Before creating any local tag, all of the following must be true:
 - platform bundle production is enabled and the produced artifact is smoke-tested;
 - changelog/version surfaces agree on the exact candidate version;
 - compatibility and performance evidence are attached to the candidate;
+- the Linux i3/X11 native qualification lane passes `pnpm release:native-qualify` before any native GPU/projection acceptance is claimed for that environment;
 - original-apply authority is still absent unless a separately authorized safety decision changes it;
 - tag/push/publish/deploy are performed only under separate explicit operator authorization.
