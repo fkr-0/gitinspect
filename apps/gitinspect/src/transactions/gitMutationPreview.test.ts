@@ -39,6 +39,8 @@ function preview(success = true): GitMutationPreview {
     changedRefs: [{ name: "refs/heads/topic", afterOid: "c".repeat(40) }],
     rewrittenCommits: [],
     hashCascade: [],
+    droppedCommits: [],
+    graphDelta: { commits: [], refs: [], truncated: false },
     warnings: [],
     failures: success
       ? []

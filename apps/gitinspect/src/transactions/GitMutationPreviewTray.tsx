@@ -11,6 +11,7 @@ import { createTauriMutationPreviewBridge } from "./tauriMutationPreview";
 
 export const MAX_GIT_MUTATION_PREVIEW_OPERATIONS = 8;
 export const MAX_GIT_MUTATION_PREVIEW_REWRITE_COMMITS = 64;
+export const MAX_GIT_MUTATION_PREVIEW_REWORD_MESSAGE_BYTES = 4096;
 const MAX_GIT_MUTATION_PREVIEW_REF_NAME_BYTES = 255;
 const MAX_GIT_MUTATION_PREVIEW_REWRITE_TEXT_CHARS = MAX_GIT_MUTATION_PREVIEW_REWRITE_COMMITS * 65;
 
@@ -24,7 +25,10 @@ export type GitMutationPreviewDraftKind =
   | "cherry-pick"
   | "rebase-reorder"
   | "squash"
-  | "fixup";
+  | "fixup"
+  | "reword"
+  | "drop"
+  | "split";
 
 export interface GitMutationPreviewDraftInput {
   readonly name?: string;
@@ -34,6 +38,19 @@ export interface GitMutationPreviewDraftInput {
   readonly ontoOid?: string;
   readonly commitOid?: string;
   readonly commitOids?: readonly string[];
+  readonly message?: string;
+}
+
+function normalizeRewordMessage(value: string | undefined): string {
+  const normalized = value?.trim();
+  if (!normalized) throw new Error("Enter a replacement commit message before staging reword.");
+  if (normalized.includes("\0")) throw new Error("Replacement commit message cannot contain NUL.");
+  if (new TextEncoder().encode(normalized).length > MAX_GIT_MUTATION_PREVIEW_REWORD_MESSAGE_BYTES) {
+    throw new Error(
+      `Replacement commit message is limited to ${MAX_GIT_MUTATION_PREVIEW_REWORD_MESSAGE_BYTES} bytes.`,
+    );
+  }
+  return normalized;
 }
 
 export interface GitMutationPreviewDraftPresentation {
@@ -47,6 +64,8 @@ export interface GitMutationPreviewDraftPresentation {
   readonly commitPlaceholder?: string;
   readonly commitListLabel?: string;
   readonly commitListPlaceholder?: string;
+  readonly messageLabel?: string;
+  readonly messagePlaceholder?: string;
 }
 
 export interface GitMutationPreviewTrayProps {
@@ -237,6 +256,29 @@ export function gitMutationPreviewDraftPresentation(
         commitListLabel: "Commit object IDs in branch order",
         commitListPlaceholder: "one full commit object ID per line, oldest to newest",
       };
+    case "reword":
+      return {
+        primaryLabel: "Branch name",
+        primaryPlaceholder: "topic/rewrite",
+        commitLabel: "Commit object ID",
+        commitPlaceholder: "full 40- or 64-hex commit object ID",
+        messageLabel: "Replacement commit message",
+        messagePlaceholder: "new commit subject and optional body",
+      };
+    case "drop":
+      return {
+        primaryLabel: "Branch name",
+        primaryPlaceholder: "topic/rewrite",
+        commitLabel: "Commit object ID to drop",
+        commitPlaceholder: "full 40- or 64-hex commit object ID",
+      };
+    case "split":
+      return {
+        primaryLabel: "Branch name",
+        primaryPlaceholder: "topic/rewrite",
+        commitLabel: "Commit object ID to split",
+        commitPlaceholder: "full 40- or 64-hex commit object ID",
+      };
     case "fixup":
       return {
         primaryLabel: "Branch name",
@@ -291,6 +333,20 @@ export function gitMutationPreviewOperation(
         ontoOid: normalizeFullOid(input.ontoOid, "Onto object ID"),
         commitOids: normalizeRewriteCommitOids(input.commitOids),
       };
+    case "reword":
+      return {
+        kind,
+        branch: normalizeRefName(input.branch ?? "", "Branch name"),
+        commitOid: normalizeFullOid(input.commitOid, "Commit object ID"),
+        message: normalizeRewordMessage(input.message),
+      };
+    case "drop":
+    case "split":
+      return {
+        kind,
+        branch: normalizeRefName(input.branch ?? "", "Branch name"),
+        commitOid: normalizeFullOid(input.commitOid, "Commit object ID"),
+      };
   }
 }
 
@@ -317,6 +373,12 @@ export function gitMutationPreviewOperationSummary(operation: GitMutationPreview
       return `Squash ${operation.commitOids.join(" + ")} on ${operation.branch} onto ${operation.ontoOid}`;
     case "fixup":
       return `Fixup ${operation.commitOids.join(" + ")} on ${operation.branch} onto ${operation.ontoOid}`;
+    case "reword":
+      return `Reword ${operation.commitOid} on ${operation.branch}`;
+    case "drop":
+      return `Drop ${operation.commitOid} from ${operation.branch}`;
+    case "split":
+      return `Split ${operation.commitOid} on ${operation.branch} deterministically`;
   }
 }
 
@@ -484,7 +546,13 @@ export function GitMutationPreviewResult({ preview }: { readonly preview: GitMut
       <p>{preview.canonicalOperations.length} ordered operation(s) evaluated.</p>
       <p>
         {preview.changedRefs.length} ref change(s) · {preview.rewrittenCommits.length} rewritten
-        commit(s) · {preview.hashCascade.length} hash-cascade entry(s)
+        commit(s) · {preview.droppedCommits.length} dropped commit(s) · {preview.hashCascade.length}{" "}
+        hash-cascade entry(s)
+      </p>
+      <p>
+        Authoritative transformed topology: {preview.graphDelta.commits.length} commit node(s) ·{" "}
+        {preview.graphDelta.refs.length} ref node(s)
+        {preview.graphDelta.truncated ? " · bounded delta is truncated" : ""}
       </p>
       {preview.changedRefs.map((change) => (
         <p key={`${change.name}:${change.beforeOid ?? ""}:${change.afterOid ?? ""}`}>
@@ -503,6 +571,11 @@ export function GitMutationPreviewResult({ preview }: { readonly preview: GitMut
           Hash cascade operation {entry.operationIndex + 1} · {entry.reason}: {entry.oldOid} →{" "}
           {entry.newOid}
           {entry.newParentOid ? ` · parent ${entry.newParentOid}` : ""}
+        </p>
+      ))}
+      {preview.droppedCommits.map((entry) => (
+        <p key={`drop:${entry.operationIndex}:${entry.oldOid}`}>
+          Dropped operation {entry.operationIndex + 1}: {entry.oldOid}
         </p>
       ))}
       {keyedWarnings.map(({ key, warning }) => (
@@ -542,6 +615,7 @@ export function GitMutationPreviewTray({
   const [targetOid, setTargetOid] = useState("");
   const [commitOid, setCommitOid] = useState("");
   const [commitOidsText, setCommitOidsText] = useState("");
+  const [message, setMessage] = useState("");
   const [stagedHistory, setStagedHistory] = useState(() =>
     createGitMutationDraftHistory<StagedMutationOperation>(),
   );
@@ -568,6 +642,7 @@ export function GitMutationPreviewTray({
       setTargetOid("");
       setCommitOid("");
       setCommitOidsText("");
+      setMessage("");
     }
     if (previewContextIdentity.length > 0) {
       setUi({ status: "idle" });
@@ -610,13 +685,14 @@ export function GitMutationPreviewTray({
           ontoOid: targetOid,
           commitOid,
           commitOids: gitMutationPreviewCommitOidList(commitOidsText),
+          message,
         }),
         error: undefined,
       };
     } catch (error) {
       return { operation: undefined, error: failureMessage(error) };
     }
-  }, [commitOid, commitOidsText, kind, name, newName, selectedCommitOid, session, targetOid]);
+  }, [commitOid, commitOidsText, kind, message, name, newName, selectedCommitOid, session, targetOid]);
 
   const stageOperation = () => {
     const operation = draft.operation;
@@ -632,6 +708,7 @@ export function GitMutationPreviewTray({
     setTargetOid("");
     setCommitOid("");
     setCommitOidsText("");
+    setMessage("");
   };
 
   const moveOperation = (fromIndex: number, toIndex: number) => {
@@ -700,7 +777,7 @@ export function GitMutationPreviewTray({
         onPreviewChange?.(preview);
         setAnnouncement(
           preview.success
-            ? `Mutation preview succeeded with ${preview.changedRefs.length} ref changes and ${preview.rewrittenCommits.length} rewritten commits.`
+            ? `Mutation preview succeeded with ${preview.changedRefs.length} ref changes, ${preview.rewrittenCommits.length} rewritten commits, and ${preview.graphDelta.commits.length} authoritative transformed commit nodes.`
             : `Mutation preview has ${preview.failures.length} conflict or validation failures.`,
         );
       }
@@ -762,13 +839,22 @@ export function GitMutationPreviewTray({
             onChange={(event) => {
               const nextKind = event.currentTarget.value as GitMutationPreviewDraftKind;
               setKind(nextKind);
-              setName("");
+              setName(
+                ["reword", "drop", "split"].includes(nextKind)
+                  ? (session?.snapshot.headRef?.replace(/^refs\/heads\//, "") ?? "")
+                  : "",
+              );
               setNewName("");
               setTargetOid(
                 nextKind === "tag-move" ? (selectedCommitOid ?? session?.snapshot.head ?? "") : "",
               );
-              setCommitOid(nextKind === "cherry-pick" ? (selectedCommitOid ?? "") : "");
+              setCommitOid(
+                ["cherry-pick", "reword", "drop", "split"].includes(nextKind)
+                  ? (selectedCommitOid ?? "")
+                  : "",
+              );
               setCommitOidsText("");
+              setMessage("");
             }}
           >
             <option value="branch-create">Create branch</option>
@@ -781,6 +867,9 @@ export function GitMutationPreviewTray({
             <option value="rebase-reorder">Reorder branch commits</option>
             <option value="squash">Squash branch commits</option>
             <option value="fixup">Fixup branch commits</option>
+            <option value="reword">Reword commit</option>
+            <option value="drop">Drop commit</option>
+            <option value="split">Split commit deterministically</option>
           </select>
         </label>
         {presentation.primaryLabel && (
@@ -793,6 +882,19 @@ export function GitMutationPreviewTray({
               disabled={ui.status === "loading"}
               onChange={(event) => setName(event.currentTarget.value)}
               placeholder={presentation.primaryPlaceholder}
+            />
+          </label>
+        )}
+        {presentation.messageLabel && (
+          <label>
+            <span className="sr-only">{presentation.messageLabel}</span>
+            <textarea
+              aria-label={presentation.messageLabel}
+              value={message}
+              maxLength={MAX_GIT_MUTATION_PREVIEW_REWORD_MESSAGE_BYTES}
+              disabled={ui.status === "loading"}
+              onChange={(event) => setMessage(event.currentTarget.value)}
+              placeholder={presentation.messagePlaceholder}
             />
           </label>
         )}
@@ -855,7 +957,8 @@ export function GitMutationPreviewTray({
           newName.length > 0 ||
           targetOid.length > 0 ||
           commitOid.length > 0 ||
-          commitOidsText.length > 0) &&
+          commitOidsText.length > 0 ||
+          message.length > 0) &&
           draft.error && <p role="status">{draft.error}</p>}
         <button
           type="button"

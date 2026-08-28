@@ -990,6 +990,13 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
       : undefined;
   const navigationDepth = navigation?.history.length ?? 0;
   const activeDataset = navigation?.current.dataset ?? state.dataset;
+  const mutationPreviewElementIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (navigationDepth > 0 || !mutationPreview) return ids;
+    for (const commit of mutationPreview.graphDelta.commits) ids.add(`commit:${commit.oid}`);
+    for (const reference of mutationPreview.graphDelta.refs) ids.add(`ref:${reference.name}`);
+    return ids;
+  }, [mutationPreview, navigationDepth]);
   const defaultChildSelectionId =
     navigationDepth > 0
       ? (navigation?.current.selectionId ??
@@ -1000,7 +1007,9 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
   const viewportSelectedElementId =
     navigationDepth > 0
       ? (navigationElementId ?? defaultChildSelectionId)
-      : state.selectedElementId;
+      : viewportSelection?.elementId && mutationPreviewElementIds.has(viewportSelection.elementId)
+        ? viewportSelection.elementId
+        : state.selectedElementId;
   const activeInspectionNode = inspectionNodeForNavigation(
     selectedNode,
     activeDataset,
@@ -1698,6 +1707,9 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
                 selectLogicalElement(logicalElementId);
                 setViewportSelection(selection);
               } else if (state.dataset?.edges.some((edge) => edge.id === logicalElementId)) {
+                setContextElementId(undefined);
+                setViewportSelection(selection);
+              } else if (mutationPreviewElementIds.has(logicalElementId)) {
                 setContextElementId(undefined);
                 setViewportSelection(selection);
               }

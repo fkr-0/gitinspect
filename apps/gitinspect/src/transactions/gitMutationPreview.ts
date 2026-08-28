@@ -26,11 +26,49 @@ export type GitMutationPreviewOperation =
       readonly branch: string;
       readonly ontoOid: string;
       readonly commitOids: readonly string[];
+    }
+  | {
+      readonly kind: "reword";
+      readonly branch: string;
+      readonly commitOid: string;
+      readonly message: string;
+    }
+  | {
+      readonly kind: "drop" | "split";
+      readonly branch: string;
+      readonly commitOid: string;
     };
 
 export interface GitMutationPreviewRef {
   readonly name: string;
   readonly targetOid: string;
+}
+
+export interface GitMutationDroppedCommit {
+  readonly oldOid: string;
+  readonly operationIndex: number;
+}
+
+export interface GitMutationPreviewGraphCommit {
+  readonly oid: string;
+  readonly parents: readonly string[];
+  readonly message: string;
+  readonly authorName: string;
+  readonly authorEmail?: string;
+  readonly authoredAtMs: number;
+  readonly committedAtMs: number;
+}
+
+export interface GitMutationPreviewGraphRef {
+  readonly name: string;
+  readonly targetOid: string;
+  readonly kind: string;
+}
+
+export interface GitMutationPreviewGraphDelta {
+  readonly commits: readonly GitMutationPreviewGraphCommit[];
+  readonly refs: readonly GitMutationPreviewGraphRef[];
+  readonly truncated: boolean;
 }
 
 export interface GitMutationPreviewSnapshotSummary {
@@ -77,6 +115,8 @@ export interface GitMutationPreview {
   readonly changedRefs: readonly GitMutationChangedRef[];
   readonly rewrittenCommits: readonly GitMutationRewrittenCommit[];
   readonly hashCascade: readonly GitMutationHashCascadeEntry[];
+  readonly droppedCommits: readonly GitMutationDroppedCommit[];
+  readonly graphDelta: GitMutationPreviewGraphDelta;
   readonly warnings: readonly string[];
   readonly failures: readonly GitMutationPreviewFailure[];
   readonly success: boolean;

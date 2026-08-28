@@ -9,7 +9,10 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicI32, Ordering},
+};
 use std::time::Duration;
 
 use mutation_preview_commands::{
@@ -20,7 +23,15 @@ use repository_commands::{AppState, open_repository_compact, refresh_repository_
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
-const REWRITE_KINDS: [&str; 4] = ["rebase-reorder", "squash", "fixup", "cherry-pick"];
+const REWRITE_KINDS: [&str; 7] = [
+    "rebase-reorder",
+    "squash",
+    "fixup",
+    "reword",
+    "drop",
+    "split",
+    "cherry-pick",
+];
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +39,7 @@ struct SmokeFixtureMetadata {
     base_oid: String,
     main_oid: String,
     linear_oids: Vec<String>,
+    split_oid: String,
     conflict_oid: String,
     long_oids: Vec<String>,
 }
@@ -77,6 +89,11 @@ impl SmokeFixture {
             linear_oids.push(commit_all(&path, &format!("linear {name}"))?);
         }
 
+        run_git(&path, ["checkout", "-b", "split", &base_oid])?;
+        fs::write(path.join("split-a.txt"), "split a\n").map_err(|error| error.to_string())?;
+        fs::write(path.join("split-b.txt"), "split b\n").map_err(|error| error.to_string())?;
+        let split_oid = commit_all(&path, "native deterministic split source")?;
+
         run_git(&path, ["checkout", "-b", "conflict", &base_oid])?;
         fs::write(path.join("conflict.txt"), "feature\n").map_err(|error| error.to_string())?;
         let conflict_oid = commit_all(&path, "feature conflict")?;
@@ -98,6 +115,7 @@ impl SmokeFixture {
             base_oid,
             main_oid,
             linear_oids,
+            split_oid,
             conflict_oid,
             long_oids,
         };
@@ -146,11 +164,36 @@ struct SmokeReport {
     cancellation_sandbox_count: usize,
     apply_disabled: bool,
     eager_materialization_commands_registered: bool,
+    frame_renderer: String,
+    frame_timing_blocker: String,
+    frame_logical_commit_count: usize,
+    frame_preview_commit_count: usize,
+    frame_samples: usize,
+    frame_baseline_median_ms: f64,
+    frame_baseline_p95_ms: f64,
+    frame_transition_median_ms: f64,
+    frame_transition_p95_ms: f64,
+    frame_transition_max_ms: f64,
+    #[serde(rename = "frameTransitionOver16_7Ms")]
+    frame_transition_over16_7_ms: usize,
+    topology_commit_latency_ms: f64,
+    frame_accessibility_live: bool,
+    frame_accessibility_pressed: bool,
+    frame_accessibility_roving: bool,
+    frame_accessibility_blocker: String,
 }
 
 #[tauri::command]
 fn mutation_preview_native_smoke_fixture(state: State<'_, SmokeState>) -> SmokeFixtureMetadata {
     state.metadata.clone()
+}
+
+#[tauri::command]
+fn mutation_preview_native_smoke_progress(message: String) {
+    println!(
+        "MUTATION_PREVIEW_NATIVE_SMOKE_PROGRESS={}",
+        message.replace(['\n', '\r'], " ")
+    );
 }
 
 #[tauri::command]
@@ -256,6 +299,57 @@ fn mutation_preview_native_smoke_complete(
         failures
             .push("native smoke registered eager diff/blob materialization commands".to_owned());
     }
+    let normalized_renderer = report.frame_renderer.trim().to_ascii_lowercase();
+    if normalized_renderer.is_empty()
+        || normalized_renderer == "unavailable"
+        || ["llvmpipe", "softpipe", "swiftshader", "software rasterizer"]
+            .iter()
+            .any(|marker| normalized_renderer.contains(marker))
+    {
+        failures.push(format!(
+            "headed GraphScene did not report a hardware-accelerated WebGL renderer: {}",
+            report.frame_renderer
+        ));
+    }
+    if report.frame_logical_commit_count != 1_000 || report.frame_preview_commit_count != 32 {
+        failures.push(format!(
+            "headed frame fixture bounds mismatch: logical={}, preview={}",
+            report.frame_logical_commit_count, report.frame_preview_commit_count
+        ));
+    }
+    if report.frame_timing_blocker.is_empty() {
+        if report.frame_samples < 120 {
+            failures.push(format!(
+                "headed frame sample bound mismatch: samples={}",
+                report.frame_samples
+            ));
+        }
+        if report.frame_baseline_median_ms <= 0.0
+            || report.frame_transition_median_ms <= 0.0
+            || report.frame_transition_p95_ms <= 0.0
+            || report.frame_transition_max_ms <= 0.0
+            || report.topology_commit_latency_ms <= 0.0
+        {
+            failures.push("headed frame timing evidence contained non-positive samples".to_owned());
+        }
+    } else if report.frame_samples != 0 {
+        failures.push(format!(
+            "headed frame timing blocker was reported with unexpected samples: blocker={}, samples={}",
+            report.frame_timing_blocker, report.frame_samples
+        ));
+    }
+    if report.frame_accessibility_blocker.is_empty()
+        && (!report.frame_accessibility_live
+            || !report.frame_accessibility_pressed
+            || !report.frame_accessibility_roving)
+    {
+        failures.push(format!(
+            "transformed-topology accessibility evidence incomplete: live={}, pressed={}, roving={}",
+            report.frame_accessibility_live,
+            report.frame_accessibility_pressed,
+            report.frame_accessibility_roving
+        ));
+    }
 
     let final_probe = probe_sandboxes(&state.sandbox_root)?;
     if final_probe.sandbox_count != 0 {
@@ -321,7 +415,7 @@ fn main() {
     let timeout_result_path = result_path.clone();
     let post_run_sandbox_root = sandbox_root.clone();
 
-    let result = tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(AppState::default())
         .manage(preview_state)
         .manage(SmokeState {
@@ -340,6 +434,7 @@ fn main() {
             confirm_mutation_preview,
             cancel_mutation_sandbox,
             mutation_preview_native_smoke_fixture,
+            mutation_preview_native_smoke_progress,
             mutation_preview_native_smoke_advance,
             mutation_preview_native_smoke_probe,
             mutation_preview_native_smoke_complete,
@@ -352,12 +447,14 @@ fn main() {
                 .get_webview_window("main")
                 .ok_or_else(|| std::io::Error::other("configured main webview is unavailable"))?;
             window.navigate(url.parse::<tauri::Url>()?)?;
+            window.show()?;
+            window.set_focus()?;
 
             let app_handle = app.handle().clone();
             let timeout_fixture_path = timeout_fixture_path.clone();
             let timeout_result_path = timeout_result_path.clone();
             std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_secs(60));
+                std::thread::sleep(Duration::from_secs(90));
                 if !timeout_result_path.exists() {
                     let _ = fs::remove_dir_all(&timeout_fixture_path);
                     let text = "MUTATION_PREVIEW_NATIVE_SMOKE=FAIL\nmessage=timed out before JavaScript smoke completion\n";
@@ -368,18 +465,35 @@ fn main() {
             });
             Ok(())
         })
-        .run(tauri::generate_context!());
+        .build(tauri::generate_context!())
+        .expect("build mutation preview native smoke Tauri application");
 
-    result.expect("run mutation preview native smoke Tauri application");
+    let requested_exit_code = Arc::new(AtomicI32::new(i32::MIN));
+    let requested_exit_code_for_run = Arc::clone(&requested_exit_code);
+    let runtime_exit_code = app.run_return(move |_, event| {
+        if let tauri::RunEvent::ExitRequested {
+            code: Some(exit_code),
+            ..
+        } = event
+        {
+            requested_exit_code_for_run.store(exit_code, Ordering::SeqCst);
+        }
+    });
+    let requested_exit_code = requested_exit_code.load(Ordering::SeqCst);
+    let exit_code = if requested_exit_code == i32::MIN {
+        runtime_exit_code
+    } else {
+        requested_exit_code
+    };
     let report_text = fs::read_to_string(&result_path).unwrap_or_else(|error| {
         format!("MUTATION_PREVIEW_NATIVE_SMOKE=FAIL\nmessage=missing result: {error}\n")
     });
-    let passed = report_text.starts_with("MUTATION_PREVIEW_NATIVE_SMOKE=PASS\n");
+    let passed = exit_code == 0 && report_text.starts_with("MUTATION_PREVIEW_NATIVE_SMOKE=PASS\n");
     let _ = fs::remove_dir_all(&fixture_path);
     let _ = fs::remove_dir_all(&post_run_sandbox_root);
     assert!(
         passed,
-        "mutation preview native smoke failed:\n{report_text}"
+        "mutation preview native smoke failed with app exit code {exit_code}:\n{report_text}"
     );
 }
 
@@ -531,6 +645,22 @@ fn format_report(report: &SmokeReport, failures: &[String]) -> String {
             "cancellation_sandbox_count={}\n",
             "apply_disabled={}\n",
             "eager_materialization_commands_registered={}\n",
+            "frame_renderer={}\n",
+            "frame_timing_blocker={}\n",
+            "frame_logical_commit_count={}\n",
+            "frame_preview_commit_count={}\n",
+            "frame_samples={}\n",
+            "frame_baseline_median_ms={}\n",
+            "frame_baseline_p95_ms={}\n",
+            "frame_transition_median_ms={}\n",
+            "frame_transition_p95_ms={}\n",
+            "frame_transition_max_ms={}\n",
+            "frame_transition_over16_7_ms={}\n",
+            "topology_commit_latency_ms={}\n",
+            "frame_accessibility_live={}\n",
+            "frame_accessibility_pressed={}\n",
+            "frame_accessibility_roving={}\n",
+            "frame_accessibility_blocker={}\n",
             "failures={}\n"
         ),
         if passed { "PASS" } else { "FAIL" },
@@ -554,6 +684,22 @@ fn format_report(report: &SmokeReport, failures: &[String]) -> String {
         report.cancellation_sandbox_count,
         report.apply_disabled,
         report.eager_materialization_commands_registered,
+        clean(&report.frame_renderer),
+        clean(&report.frame_timing_blocker),
+        report.frame_logical_commit_count,
+        report.frame_preview_commit_count,
+        report.frame_samples,
+        report.frame_baseline_median_ms,
+        report.frame_baseline_p95_ms,
+        report.frame_transition_median_ms,
+        report.frame_transition_p95_ms,
+        report.frame_transition_max_ms,
+        report.frame_transition_over16_7_ms,
+        report.topology_commit_latency_ms,
+        report.frame_accessibility_live,
+        report.frame_accessibility_pressed,
+        report.frame_accessibility_roving,
+        clean(&report.frame_accessibility_blocker),
         failures
             .iter()
             .map(|failure| clean(failure))

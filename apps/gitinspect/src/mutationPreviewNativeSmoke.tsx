@@ -1,14 +1,330 @@
 import { createRoot, type Root } from "react-dom/client";
+import { GraphViewport } from "./components/GraphViewport";
+import { createSyntheticGitHistory } from "./scale/synthetic";
 import type { RepositorySession } from "./services/repository";
 import { createTauriRepositoryService } from "./services/tauriRepository";
 import { GitMutationPreviewTray } from "./transactions/GitMutationPreviewTray";
+import type { GitMutationPreview } from "./transactions/gitMutationPreview";
+import "./styles.css";
 
 interface FixtureMetadata {
   readonly baseOid: string;
   readonly mainOid: string;
   readonly linearOids: readonly string[];
+  readonly splitOid: string;
   readonly conflictOid: string;
   readonly longOids: readonly string[];
+}
+
+function percentile(values: readonly number[], ratio: number): number {
+  const sorted = [...values].sort((left, right) => left - right);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * ratio) - 1));
+  return sorted[index] ?? 0;
+}
+
+async function sampleAnimationFrames(count: number): Promise<readonly number[]> {
+  return new Promise((resolve, reject) => {
+    const intervals: number[] = [];
+    let previous: number | undefined;
+    const timeout = window.setTimeout(() => {
+      reject(
+        new Error(
+          `Headed requestAnimationFrame cadence stalled after ${intervals.length}/${count} samples`,
+        ),
+      );
+    }, 15_000);
+    const tick = (timestamp: number) => {
+      if (previous !== undefined) intervals.push(timestamp - previous);
+      previous = timestamp;
+      if (intervals.length >= count) {
+        window.clearTimeout(timeout);
+        resolve(intervals);
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+function rounded(value: number): number {
+  return Math.round(value * 1_000) / 1_000;
+}
+
+function previewFrameFixture(
+  baseRevision: string,
+  commitCount: number,
+  logicalCommitCount = 1_000,
+): GitMutationPreview {
+  const rewritten = Array.from({ length: commitCount }, (_, index) => {
+    const oid = `${"f".repeat(32)}${index.toString(16).padStart(8, "0")}`;
+    const parent =
+      index === 0 ? undefined : `${"f".repeat(32)}${(index - 1).toString(16).padStart(8, "0")}`;
+    return { oid, parent };
+  });
+  const lastRewritten = rewritten.at(-1);
+  return {
+    sandboxId: "gpu-frame-sandbox",
+    transactionId: "gpu-frame-transition",
+    baseRevision,
+    operationDigest: `sha256:${"f".repeat(64)}`,
+    canonicalOperations: ["synthetic-headed-frame-transition"],
+    before: { refs: [], commitCount: logicalCommitCount, truncated: false },
+    after: { refs: [], commitCount: logicalCommitCount + commitCount, truncated: false },
+    changedRefs: lastRewritten
+      ? [{ name: "refs/heads/frame-preview", afterOid: lastRewritten.oid }]
+      : [],
+    rewrittenCommits: rewritten.map((entry, index) => ({
+      oldOid: index.toString(16).padStart(40, "0"),
+      newOid: entry.oid,
+      operationIndex: 0,
+    })),
+    hashCascade: rewritten.map((entry, index) => ({
+      oldOid: index.toString(16).padStart(40, "0"),
+      newOid: entry.oid,
+      operationIndex: 0,
+      reason: "frame-transition",
+      ...(entry.parent ? { newParentOid: entry.parent } : {}),
+    })),
+    droppedCommits: [],
+    graphDelta: {
+      commits: rewritten.map((entry, index) => ({
+        oid: entry.oid,
+        parents: entry.parent ? [entry.parent] : [],
+        message: `Frame transition rewritten commit ${index}`,
+        authorName: "Frame Evidence",
+        authoredAtMs: 1_700_000_000_000 + index * 60_000,
+        committedAtMs: 1_700_000_000_000 + index * 60_000,
+      })),
+      refs: lastRewritten
+        ? [
+            {
+              name: "refs/heads/frame-preview",
+              targetOid: lastRewritten.oid,
+              kind: "local-branch",
+            },
+          ]
+        : [],
+      truncated: false,
+    },
+    warnings: [],
+    failures: [],
+    success: true,
+    previewToken: "preview:gpu-frame-transition",
+  };
+}
+
+async function measureHeadedMutationPreviewFrames() {
+  window.focus();
+  const logicalCommitCount = 1_000;
+  const previewCommitCount = 32;
+  const dataset = createSyntheticGitHistory(logicalCommitCount);
+  const host = document.createElement("div");
+  host.style.width = "1280px";
+  host.style.height = "720px";
+  host.style.position = "fixed";
+  host.style.inset = "0";
+  host.style.zIndex = "9999";
+  document.body.append(host);
+  const graphRoot = createRoot(host);
+  const initialSelectedId = dataset.nodes.find((node) => node.kind === "commit")?.id;
+  assert(initialSelectedId, "headed frame fixture has no commit to select");
+  let selectedElementId: string | undefined = initialSelectedId;
+  let renderedPreview: GitMutationPreview | undefined;
+  const search = "";
+  const render = (mutationPreview = renderedPreview) => {
+    renderedPreview = mutationPreview;
+    graphRoot.render(
+      <GraphViewport
+        dataset={dataset}
+        selectedElementId={selectedElementId}
+        search={search}
+        {...(mutationPreview ? { mutationPreview } : {})}
+        onSelect={(elementId) => {
+          selectedElementId = elementId;
+          render();
+        }}
+      />,
+    );
+  };
+  render();
+  await waitFor(
+    "headed GraphScene canvas",
+    () => Boolean(host.querySelector(".viewport__canvas canvas")),
+    30_000,
+  );
+  const canvas = host.querySelector<HTMLCanvasElement>(".viewport__canvas canvas");
+  assert(canvas, "headed GraphScene canvas disappeared before timing");
+  const gl = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
+  assert(gl, "headed GraphScene did not expose a WebGL context");
+  const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
+  const frameRenderer = String(
+    gl.getParameter(debugInfo ? debugInfo.UNMASKED_RENDERER_WEBGL : gl.RENDERER),
+  );
+
+  try {
+    await sampleAnimationFrames(30);
+    const baseline = await sampleAnimationFrames(90);
+    const preview = previewFrameFixture(dataset.revision, previewCommitCount);
+    const transitionFrames = sampleAnimationFrames(120);
+    const transitionRequestedAt = performance.now();
+    render(preview);
+    await waitFor(
+      "authoritative mutation topology commit",
+      () =>
+        host.textContent?.includes(`${previewCommitCount} authoritative transformed commit nodes`) ===
+        true,
+      30_000,
+    );
+    const topologyCommitLatencyMs = performance.now() - transitionRequestedAt;
+    const transition = await transitionFrames;
+
+    return {
+      frameRenderer,
+      frameTimingBlocker: "",
+      frameLogicalCommitCount: logicalCommitCount,
+      framePreviewCommitCount: previewCommitCount,
+      frameSamples: transition.length,
+      frameBaselineMedianMs: rounded(percentile(baseline, 0.5)),
+      frameBaselineP95Ms: rounded(percentile(baseline, 0.95)),
+      frameTransitionMedianMs: rounded(percentile(transition, 0.5)),
+      frameTransitionP95Ms: rounded(percentile(transition, 0.95)),
+      frameTransitionMaxMs: rounded(Math.max(...transition)),
+      frameTransitionOver16_7Ms: transition.filter((value) => value > 16.7).length,
+      topologyCommitLatencyMs: rounded(topologyCommitLatencyMs),
+    };
+  } catch (error: unknown) {
+    return {
+      frameRenderer,
+      frameTimingBlocker: error instanceof Error ? error.message : String(error),
+      frameLogicalCommitCount: logicalCommitCount,
+      framePreviewCommitCount: previewCommitCount,
+      frameSamples: 0,
+      frameBaselineMedianMs: 0,
+      frameBaselineP95Ms: 0,
+      frameTransitionMedianMs: 0,
+      frameTransitionP95Ms: 0,
+      frameTransitionMaxMs: 0,
+      frameTransitionOver16_7Ms: 0,
+      topologyCommitLatencyMs: 0,
+    };
+  } finally {
+    graphRoot.unmount();
+    host.remove();
+  }
+}
+
+async function verifyHeadedTransformedTopologyAccessibility() {
+  const logicalCommitCount = 1_000;
+  const previewCommitCount = 4;
+  const dataset = createSyntheticGitHistory(logicalCommitCount);
+  const preview = previewFrameFixture(dataset.revision, previewCommitCount, logicalCommitCount);
+  const host = document.createElement("div");
+  host.style.width = "1280px";
+  host.style.height = "720px";
+  host.style.position = "fixed";
+  host.style.inset = "0";
+  host.style.zIndex = "9999";
+  document.body.append(host);
+  const root = createRoot(host);
+  const authoritativeSelectedOid = preview.graphDelta.commits[0]?.oid;
+  assert(authoritativeSelectedOid, "headed accessibility fixture has no authoritative commit");
+  let selectedElementId: string | undefined = `commit:${authoritativeSelectedOid}`;
+  const render = () => {
+    root.render(
+      <GraphViewport
+        dataset={dataset}
+        selectedElementId={selectedElementId}
+        search="Frame transition"
+        mutationPreview={preview}
+        onSelect={(elementId) => {
+          selectedElementId = elementId;
+          render();
+        }}
+      />,
+    );
+  };
+  render();
+  await waitFor(
+    "headed accessibility GraphScene canvas",
+    () => Boolean(host.querySelector(".viewport__canvas canvas")),
+    30_000,
+  );
+  await waitFor(
+    "headed transformed topology live announcement",
+    () =>
+      text(host.querySelector("#viewport-mutation-status")).includes(
+        `${previewCommitCount} authoritative transformed commit nodes`,
+      ),
+    30_000,
+  );
+  const liveStatus = host.querySelector<HTMLElement>("#viewport-mutation-status");
+  const frameAccessibilityLive = liveStatus?.getAttribute("aria-live") === "polite";
+  assert(frameAccessibilityLive, "transformed topology did not use a polite mutation live region");
+
+  await waitFor(
+    "projected authoritative transformed node",
+    () =>
+      [
+        ...host.querySelectorAll<HTMLButtonElement>("button.viewport-node[data-mutation-affected]"),
+      ].some((button) =>
+        button.getAttribute("aria-label")?.includes("Frame transition rewritten commit"),
+      ),
+    30_000,
+  );
+  const previewButton = [
+    ...host.querySelectorAll<HTMLButtonElement>("button.viewport-node[data-mutation-affected]"),
+  ].find((button) =>
+    button.getAttribute("aria-label")?.includes("Frame transition rewritten commit"),
+  );
+  assert(previewButton, "authoritative transformed node did not expose a projected button");
+  previewButton.click();
+  await waitFor("transformed-node aria-pressed selection", () =>
+    [...host.querySelectorAll<HTMLButtonElement>('button.viewport-node[aria-pressed="true"]')].some(
+      (button) => button.getAttribute("aria-label")?.includes("Frame transition rewritten commit"),
+    ),
+  );
+  const frameAccessibilityPressed = true;
+
+  const rovingButtons = [...host.querySelectorAll<HTMLButtonElement>("button.viewport-node")];
+  const rovingTabStops = rovingButtons.filter((button) => button.tabIndex === 0);
+  const frameAccessibilityRoving =
+    rovingButtons.length >= 2 &&
+    rovingTabStops.length === 1 &&
+    rovingTabStops[0]?.getAttribute("aria-pressed") === "true" &&
+    rovingTabStops[0]?.getAttribute("aria-label")?.includes("Frame transition rewritten commit") ===
+      true;
+  assert(
+    frameAccessibilityRoving,
+    "selected authoritative transformed node did not own the single roving tab stop",
+  );
+
+  root.unmount();
+  host.remove();
+  return { frameAccessibilityLive, frameAccessibilityPressed, frameAccessibilityRoving };
+}
+
+async function stageSingleCommitRewrite(
+  kind: "reword" | "drop" | "split",
+  branch: string,
+  commitOid: string,
+  message?: string,
+): Promise<void> {
+  await chooseKind(kind);
+  await fill("Branch name", branch);
+  const commitLabel =
+    kind === "drop"
+      ? "Commit object ID to drop"
+      : kind === "split"
+        ? "Commit object ID to split"
+        : "Commit object ID";
+  await fill(commitLabel, commitOid);
+  if (kind === "reword") await fill("Replacement commit message", message ?? "native reword");
+  await waitFor(
+    `${kind} draft validation`,
+    () => buttonByText("Stage operation")?.disabled === false,
+  );
+  await clickButton("Stage operation");
 }
 
 interface SandboxProbe {
@@ -39,6 +355,22 @@ interface SmokeReport {
   readonly cancellationSandboxCount: number;
   readonly applyDisabled: boolean;
   readonly eagerMaterializationCommandsRegistered: boolean;
+  readonly frameRenderer: string;
+  readonly frameTimingBlocker: string;
+  readonly frameLogicalCommitCount: number;
+  readonly framePreviewCommitCount: number;
+  readonly frameSamples: number;
+  readonly frameBaselineMedianMs: number;
+  readonly frameBaselineP95Ms: number;
+  readonly frameTransitionMedianMs: number;
+  readonly frameTransitionP95Ms: number;
+  readonly frameTransitionMaxMs: number;
+  readonly frameTransitionOver16_7Ms: number;
+  readonly topologyCommitLatencyMs: number;
+  readonly frameAccessibilityLive: boolean;
+  readonly frameAccessibilityPressed: boolean;
+  readonly frameAccessibilityRoving: boolean;
+  readonly frameAccessibilityBlocker: string;
 }
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -48,6 +380,10 @@ function assert(condition: unknown, message: string): asserts condition {
 function status(message: string): void {
   const node = document.getElementById("mutation-preview-native-smoke-status");
   if (node) node.textContent = message;
+  const tauri = window.__TAURI__;
+  if (tauri?.core?.invoke) {
+    void tauri.core.invoke("mutation_preview_native_smoke_progress", { message }).catch(() => {});
+  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -410,6 +746,48 @@ async function run(): Promise<void> {
   await resetTray();
   await waitForSandboxCount(0);
 
+  status("testing native reword rewrite evidence and transformed topology…");
+  await stageSingleCommitRewrite("reword", "linear", linearFirst, "native reworded subject");
+  const rewordResult = await previewAndWait("Preview succeeded");
+  assert(
+    text(rewordResult).includes("Hash cascade operation 1 · reword:"),
+    "reword target evidence missing",
+  );
+  assert(
+    text(rewordResult).includes("reword-descendant"),
+    "reword descendant cascade evidence missing",
+  );
+  assert(
+    text(rewordResult).includes("Authoritative transformed topology:"),
+    "reword transformed topology evidence missing",
+  );
+  rewriteKinds.push("reword");
+  await resetTray();
+  await waitForSandboxCount(0);
+
+  status("testing native dependency-free drop evidence…");
+  await stageSingleCommitRewrite("drop", "linear", linearThird);
+  const dropResult = await previewAndWait("Preview succeeded");
+  assert(text(dropResult).includes(`Dropped operation 1: ${linearThird}`), "drop evidence missing");
+  assert(text(dropResult).includes("refs/heads/linear"), "drop changed-ref evidence missing");
+  rewriteKinds.push("drop");
+  await resetTray();
+  await waitForSandboxCount(0);
+
+  status("testing native deterministic split evidence…");
+  await stageSingleCommitRewrite("split", "split", fixture.splitOid);
+  const splitResult = await previewAndWait("Preview succeeded");
+  const splitEvidence = parseRewriteEvidence(splitResult, 1, "split");
+  assert(splitEvidence.oldOids.length === 2, "split did not expose exactly two rewritten commits");
+  assert(new Set(splitEvidence.newOids).size === 2, "split did not create two distinct commits");
+  assert(
+    text(splitResult).includes("Authoritative transformed topology: 2 commit node(s)"),
+    "split topology did not render both new commits",
+  );
+  rewriteKinds.push("split");
+  await resetTray();
+  await waitForSandboxCount(0);
+
   status("testing structured native cherry-pick conflict rendering…");
   await stageCherryPick(fixture.conflictOid);
   const conflictResult = await previewAndWait("Preview has conflicts");
@@ -485,7 +863,9 @@ async function run(): Promise<void> {
   renderTray(root, session, selectedCommitOid);
   await waitFor(
     "context-change cancellation to return tray to idle",
-    () => buttonByText("Preview ordered operations")?.disabled === false,
+    () =>
+      buttonByText("Preview ordered operations")?.disabled === false &&
+      document.querySelector('[data-testid="mutation-preview-result"]') === null,
   );
   const cancellationReturnedToIdle =
     buttonByText("Preview ordered operations")?.disabled === false &&
@@ -503,10 +883,24 @@ async function run(): Promise<void> {
   );
 
   root.unmount();
+  status("measuring headed accelerated GraphScene mutation-preview frame cadence on 1k fixture…");
+  const frameEvidence = await measureHeadedMutationPreviewFrames();
+  status("verifying headed transformed-topology accessibility semantics…");
+  let accessibilityEvidence = {
+    frameAccessibilityLive: false,
+    frameAccessibilityPressed: false,
+    frameAccessibilityRoving: false,
+  };
+  let frameAccessibilityBlocker = "";
+  try {
+    accessibilityEvidence = await verifyHeadedTransformedTopologyAccessibility();
+  } catch (error: unknown) {
+    frameAccessibilityBlocker = error instanceof Error ? error.message : String(error);
+  }
   const report: SmokeReport = {
     passed: true,
     message:
-      "actual React tray -> production Tauri mutation bridge/commands -> disposable Rust backend passed ordered rewrite, conflict, stale, cancellation, and preview-only cleanup gates",
+      "actual React tray -> production Tauri mutation bridge/commands -> disposable Rust backend passed reword/drop/split, ordered rewrite, conflict, stale, cancellation, transformed-topology, and preview-only cleanup gates",
     rewriteKinds,
     orderedOperationSummaries,
     reorderOldOids: reorderEvidence.oldOids,
@@ -521,13 +915,19 @@ async function run(): Promise<void> {
     cancellationSandboxCount,
     applyDisabled,
     eagerMaterializationCommandsRegistered: false,
+    ...frameEvidence,
+    ...accessibilityEvidence,
+    frameAccessibilityBlocker,
   };
   status(`PASS\n${JSON.stringify(report, null, 2)}`);
   await tauri.core.invoke<void>("mutation_preview_native_smoke_complete", { report });
 }
 
 void run().catch(async (error: unknown) => {
-  const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  const message =
+    error instanceof Error
+      ? `${error.message}${error.stack && !error.stack.startsWith(error.message) ? `\n${error.stack}` : ""}`
+      : String(error);
   status(`FAIL\n${message}`);
   const tauri = window.__TAURI__;
   if (!tauri?.core?.invoke) throw error;
@@ -548,6 +948,22 @@ void run().catch(async (error: unknown) => {
     cancellationSandboxCount: 999,
     applyDisabled: false,
     eagerMaterializationCommandsRegistered: false,
+    frameRenderer: "unavailable",
+    frameTimingBlocker: "native smoke failed before headed frame timing qualification",
+    frameLogicalCommitCount: 0,
+    framePreviewCommitCount: 0,
+    frameSamples: 0,
+    frameBaselineMedianMs: 0,
+    frameBaselineP95Ms: 0,
+    frameTransitionMedianMs: 0,
+    frameTransitionP95Ms: 0,
+    frameTransitionMaxMs: 0,
+    frameTransitionOver16_7Ms: 0,
+    topologyCommitLatencyMs: 0,
+    frameAccessibilityLive: false,
+    frameAccessibilityPressed: false,
+    frameAccessibilityRoving: false,
+    frameAccessibilityBlocker: "native smoke failed before headed accessibility qualification",
   };
   await tauri.core.invoke<void>("mutation_preview_native_smoke_complete", { report });
 });

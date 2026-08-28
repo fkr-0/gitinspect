@@ -43,6 +43,7 @@ import type { GitMutationPreview } from "../transactions/gitMutationPreview";
 import {
   createMutationPreviewMapper,
   gitMutationPreviewAffectedIds,
+  mutationPreviewGraphDataset,
 } from "../transactions/mutationPreviewVisual";
 import type { ViewportTopologyFitRequest } from "./ViewportCameraBridge";
 import {
@@ -357,6 +358,10 @@ export function GraphViewport({
   onSelect,
   onContextRequest,
 }: GraphViewportProps) {
+  const viewportDataset = useMemo(
+    () => mutationPreviewGraphDataset(dataset, mutationPreview),
+    [dataset, mutationPreview],
+  );
   const semanticInteractionEnabled = pointerMode === "cursor";
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const filterKey = viewportSearchFilterKey(filters);
@@ -365,8 +370,8 @@ export function GraphViewport({
   scaleSearchRef.current ??= new GitWorldScaleSearchAdapter();
   const pickRegistryRef = useRef<PickRegistry | undefined>(undefined);
   pickRegistryRef.current ??= new PickRegistry();
-  const interactionDatasetRef = useRef<GraphDataset | undefined>(dataset);
-  interactionDatasetRef.current = dataset;
+  const interactionDatasetRef = useRef<GraphDataset | undefined>(viewportDataset);
+  interactionDatasetRef.current = viewportDataset;
   const interactionManagerRef = useRef<InteractionManager | undefined>(undefined);
   interactionManagerRef.current ??= new InteractionManager(pickRegistryRef.current, {
     resolveRelatedIds: (record, granularity) => {
@@ -390,8 +395,9 @@ export function GraphViewport({
   const lodCameraPositionRef = useRef<Vec3>(cameraState.position);
   const [lodCameraPosition, setLodCameraPosition] = useState<Vec3>(cameraState.position);
   const topologyContext = useMemo(
-    () => (dataset ? buildGitTopologyContext(dataset, selectedElementId) : undefined),
-    [dataset, selectedElementId],
+    () =>
+      viewportDataset ? buildGitTopologyContext(viewportDataset, selectedElementId) : undefined,
+    [selectedElementId, viewportDataset],
   );
   useEffect(() => {
     const position: Vec3 = [...cameraState.position];
@@ -399,11 +405,11 @@ export function GraphViewport({
     setLodCameraPosition(position);
   }, [cameraState]);
   const model = useMemo(() => {
-    if (!dataset) return undefined;
+    if (!viewportDataset) return undefined;
     const scaleSearch = scaleSearchRef.current;
     if (!scaleSearch) return undefined;
     return scaleSearch.project({
-      dataset,
+      dataset: viewportDataset,
       camera: { position: lodCameraPosition },
       ...(normalizedSearch
         ? { search: { text: normalizedSearch, mode: "substring" as const, limit: 200 } }
@@ -413,12 +419,12 @@ export function GraphViewport({
       ...(hoveredElementId ? { hoveredIds: new Set([hoveredElementId]) } : {}),
     });
   }, [
-    dataset,
     effectiveFilters,
     hoveredElementId,
     lodCameraPosition,
     normalizedSearch,
     selectedElementId,
+    viewportDataset,
   ]);
   const reportedSearchResults = viewportSearchResults(
     normalizedSearch,
@@ -472,9 +478,9 @@ export function GraphViewport({
     const exists =
       selectedElementId === undefined
         ? false
-        : dataset?.nodes.some((node) => node.id === selectedElementId) === true;
+        : viewportDataset?.nodes.some((node) => node.id === selectedElementId) === true;
     syncViewportInteractionSelection(picks, interactions, exists ? selectedElementId : undefined);
-  }, [dataset, selectedElementId]);
+  }, [selectedElementId, viewportDataset]);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -504,10 +510,10 @@ export function GraphViewport({
       const picks = pickRegistryRef.current;
       if (!picks) return false;
       picks.unregister(reference);
-      picks.register(reference, viewportPickRecord(identity, aggregateDrillTargets, dataset));
+      picks.register(reference, viewportPickRecord(identity, aggregateDrillTargets, viewportDataset));
       return true;
     },
-    [aggregateDrillTargets, dataset],
+    [aggregateDrillTargets, viewportDataset],
   );
 
   const selectSemanticIdentity = useCallback(
@@ -563,12 +569,12 @@ export function GraphViewport({
   }, [model]);
   const topologyFit = useMemo<ViewportTopologyFitRequest | undefined>(() => {
     if (
-      !dataset ||
+      !viewportDataset ||
       !model ||
       !nodePositions ||
       cameraMode !== "attached" ||
-      !dataset.nodes.some((node) => node.kind === "commit") ||
-      !dataset.edges.some((edge) => edge.kind === "history" || edge.kind === "merge-parent")
+      !viewportDataset.nodes.some((node) => node.kind === "commit") ||
+      !viewportDataset.edges.some((edge) => edge.kind === "history" || edge.kind === "merge-parent")
     ) {
       return undefined;
     }
@@ -582,7 +588,7 @@ export function GraphViewport({
         : undefined;
     const bounds = focus ? contextualGitCameraBounds(overview, focus) : overview;
     return Object.freeze({
-      key: `${dataset.revision}:${selectedElementId ?? "overview"}`,
+      key: `${viewportDataset.revision}:${selectedElementId ?? "overview"}`,
       bounds,
       ...(selectedElementId !== undefined && nodePositions.has(selectedElementId)
         ? { targetElementId: selectedElementId }
@@ -591,11 +597,11 @@ export function GraphViewport({
   }, [
     cameraMode,
     cameraState,
-    dataset,
     model,
     nodePositions,
     selectedElementId,
     topologyContext,
+    viewportDataset,
   ]);
   const visibilityRange = useMemo(
     () =>
@@ -692,10 +698,10 @@ export function GraphViewport({
         : searchMapper,
     [mutationAffectedIds, searchMapper],
   );
-  const tooltipNode = dataset?.nodes.find((node) => node.id === tooltipRecord?.elementId);
-  const tooltipEdge = dataset?.edges.find((edge) => edge.id === tooltipRecord?.elementId);
+  const tooltipNode = viewportDataset?.nodes.find((node) => node.id === tooltipRecord?.elementId);
+  const tooltipEdge = viewportDataset?.edges.find((edge) => edge.id === tooltipRecord?.elementId);
   const tooltipFilePath =
-    dataset && tooltipRecord
+    viewportDataset && tooltipRecord
       ? changedFilePathForGitSelection(
           {
             elementId: tooltipRecord.elementId,
@@ -704,20 +710,23 @@ export function GraphViewport({
               : { interactionKey: tooltipRecord.interactionKey }),
             granularity: "sub-element",
           },
-          dataset,
+          viewportDataset,
         )
       : undefined;
-  const selectedAccessibleNode = dataset?.nodes.find((node) => node.id === selectedElementId);
+  const selectedAccessibleNode = viewportDataset?.nodes.find((node) => node.id === selectedElementId);
   const selectedAccessibleSummary = selectedAccessibleNode
     ? `Selected ${selectedAccessibleNode.label ?? selectedAccessibleNode.id}, ${selectedAccessibleNode.kind}.`
     : selectedElementId
       ? `Selected ${selectedElementId}.`
       : "No graph node selected.";
-  const visibleMutationAffectedCount = dataset
-    ? dataset.nodes.reduce((count, node) => count + (mutationAffectedIds.has(node.id) ? 1 : 0), 0)
+  const visibleMutationAffectedCount = viewportDataset
+    ? viewportDataset.nodes.reduce(
+        (count, node) => count + (mutationAffectedIds.has(node.id) ? 1 : 0),
+        0,
+      )
     : 0;
   const mutationAccessibleSummary = mutationPreview
-    ? `Mutation preview ${mutationPreview.success ? "succeeded" : "has conflicts"}; ${visibleMutationAffectedCount} visible graph node${visibleMutationAffectedCount === 1 ? "" : "s"} affected.`
+    ? `Mutation preview ${mutationPreview.success ? "succeeded" : "has conflicts"}; ${mutationPreview.graphDelta.commits.length} authoritative transformed commit node${mutationPreview.graphDelta.commits.length === 1 ? "" : "s"}; ${visibleMutationAffectedCount} visible graph node${visibleMutationAffectedCount === 1 ? "" : "s"} affected.`
     : "No mutation preview active.";
   const canRenderCanvas = typeof window !== "undefined";
 
@@ -811,7 +820,7 @@ export function GraphViewport({
         </strong>
         <span>
           {model
-            ? `${model.scale.renderDataset.edges.length} rendered relations · ${model.scale.stats.aggregateBucketCount} aggregates · ${dataset?.revision}`
+            ? `${model.scale.renderDataset.edges.length} rendered relations · ${model.scale.stats.aggregateBucketCount} aggregates · ${viewportDataset?.revision}`
             : "Open a repository to hydrate the scene"}
         </span>
       </div>
