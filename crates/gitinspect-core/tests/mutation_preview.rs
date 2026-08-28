@@ -18,7 +18,80 @@ struct Fixture {
     base: String,
     main: String,
     linear: Vec<String>,
+    merge_range: Vec<String>,
+    rename_chain: Vec<String>,
     conflict: String,
+}
+
+#[test]
+fn rebase_across_merge_commit_fails_closed_with_structured_feedback() {
+    let fixture = Fixture::new();
+    assert!(fixture.merge_range.len() >= 3);
+    let result = preview_one(
+        &fixture,
+        MutationPreviewOperation::RebaseReorder {
+            branch: "main".to_owned(),
+            onto_oid: fixture.base.clone(),
+            commit_oids: fixture.merge_range.clone(),
+        },
+    );
+
+    assert!(!result.success);
+    assert_eq!(result.failures.len(), 1);
+    assert_eq!(result.failures[0].operation_kind, "rebase-reorder");
+    assert_eq!(result.failures[0].code, "invalid-rewrite-range");
+    assert!(
+        result.failures[0]
+            .message
+            .contains("merge commits are not supported by the linear rewrite preview")
+    );
+}
+
+#[test]
+fn squash_that_attempts_to_include_root_commit_is_rejected_before_rewrite() {
+    let fixture = Fixture::new();
+    let mut requested = vec![fixture.base.clone()];
+    requested.extend(fixture.linear.clone());
+    let result = preview_one(
+        &fixture,
+        MutationPreviewOperation::Squash {
+            branch: "linear".to_owned(),
+            onto_oid: fixture.base.clone(),
+            commit_oids: requested,
+        },
+    );
+
+    assert!(!result.success);
+    assert_eq!(result.failures.len(), 1);
+    assert_eq!(result.failures[0].operation_kind, "squash");
+    assert_eq!(result.failures[0].code, "invalid-rewrite-range");
+    assert!(result.failures[0].message.contains(
+        "squash/fixup commit list must exactly match the branch range in original order"
+    ));
+}
+
+#[test]
+fn reordering_a_file_rename_dependency_chain_fails_structurally_without_touching_original() {
+    let fixture = Fixture::new();
+    let requested = vec![
+        fixture.rename_chain[0].clone(),
+        fixture.rename_chain[2].clone(),
+        fixture.rename_chain[1].clone(),
+    ];
+    let result = preview_one(
+        &fixture,
+        MutationPreviewOperation::RebaseReorder {
+            branch: "rename-chain".to_owned(),
+            onto_oid: fixture.base.clone(),
+            commit_oids: requested,
+        },
+    );
+
+    assert!(!result.success);
+    assert_eq!(result.failures.len(), 1);
+    assert_eq!(result.failures[0].operation_kind, "rebase-reorder");
+    assert!(["conflict", "git"].contains(&result.failures[0].code.as_str()));
+    assert!(!result.failures[0].message.is_empty());
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +128,15 @@ impl Fixture {
             linear.push(commit(&path, &format!("add {name}")));
         }
 
+        git(&path, ["checkout", "-b", "rename-chain", &base]);
+        let mut rename_chain = Vec::new();
+        write(&path, "rename-old.txt", "rename chain\n");
+        rename_chain.push(commit(&path, "introduce rename dependency"));
+        git(&path, ["mv", "rename-old.txt", "rename-mid.txt"]);
+        rename_chain.push(commit(&path, "rename old to mid"));
+        git(&path, ["mv", "rename-mid.txt", "rename-new.txt"]);
+        rename_chain.push(commit(&path, "rename mid to new"));
+
         git(&path, ["checkout", "-b", "conflict", &base]);
         write(&path, "conflict.txt", "feature\n");
         let conflict = commit(&path, "feature conflict");
@@ -71,6 +153,13 @@ impl Fixture {
             ["merge", "--no-ff", "merge-side", "-m", "merge side"],
         );
         let main = output(&path, ["rev-parse", "HEAD"]);
+        let merge_range = output(
+            &path,
+            ["rev-list", "--reverse", "main", &format!("^{base}")],
+        )
+        .lines()
+        .map(str::to_owned)
+        .collect();
 
         let (handle, snapshot) = RepositoryService::open(&path, OpenOptions::default()).unwrap();
         Self {
@@ -80,6 +169,8 @@ impl Fixture {
             base,
             main,
             linear,
+            merge_range,
+            rename_chain,
             conflict,
         }
     }
