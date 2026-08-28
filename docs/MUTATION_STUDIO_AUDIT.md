@@ -1,8 +1,8 @@
 # Mutation Studio Audit
 
-Status: **Phase 37 COMPLETE/GREEN** for the requested preview-only mutation vocabulary, authoritative transformed-topology contract, release tests, accessibility semantics, CPU scale gates, startup bundle gate, and genuine headed GPU/frame-timing evidence. A strict FPS/frame-budget pass remains explicitly **unqualified** because the final headed run contained an 8.292 s scheduling/visibility outlier; CPU planner timing is not substituted for GPU evidence.
+Status: **Phase 38 COMPLETE/GREEN** for preview-only transformed-topology continuity and controlled headed scheduling authority. The Phase-37 8.292 s event is now reproducibly tied to the native window/workspace visibility/focus condition: hidden/unfocused native WebKit fails closed with zero accepted samples, while two visible/focused native runs recover 16/17 ms median/p95 cadence with 17 ms maxima. CPU planner timing remains separate and is never substituted for GPU evidence. A universal strict 16.7 ms frame-budget guarantee remains explicitly **unclaimed**.
 
-Authority boundary: Gitinspect mutation execution remains **disposable-copy preview only**. The application exposes no original-repository apply command. The Phase-28 through Phase-31 original-apply safety case remains **NO-GO** and is not reopened or weakened by Phase 37.
+Authority boundary: Gitinspect mutation execution remains **disposable-copy preview only**. The application exposes no original-repository apply command. The Phase-28 through Phase-31 original-apply safety case remains **NO-GO** and is not reopened or weakened by Phase 38.
 
 ## Phase-37 durable implementation commits
 
@@ -158,6 +158,31 @@ This is genuine headed GPU/frame-timing evidence. Phase 37 nevertheless **does n
 
 The same native smoke passes the real React tray -> production Tauri commands -> disposable Rust backend lifecycle for rebase-reorder, squash, fixup, reword, drop, split, cherry-pick conflict, stale-revision rejection, in-flight cancellation, preview-only confirmation, disabled apply, and zero sandbox leakage. Headed projected-node pressed/roving accessibility remains explicitly unclaimed: the exact blocker is `Timed out waiting for projected authoritative transformed node`, and AT-SPI is unavailable in the automated desktop session; DOM/unit/integration accessibility semantics remain the Phase-37 accessibility authority.
 
+## Phase-38 scheduling and continuity closure
+
+Durable implementation commit: `9f830b9` (`feat(app): qualify mutation topology continuity`).
+
+Phase 38 adds explicit rewrite-lineage continuity over the authoritative backend delta. Complete, successful, revision-matching previews retire old rewritten commit identities, replace parent/ref edges only from authoritative objects, annotate new nodes with old-OID lineage, and move the effective viewport selection only for a unique old->new successor. Drop clears selection; split does not guess among multiple successors; stale, failed, or truncated preview authority does not destructively retire identities or remap selection. A 4,096-node / 64-rewrite regression verifies that no retired identity remains in edges. Clearing/cancelling preview restores the caller's durable root selection without residue.
+
+No decorative topology morph was introduced: the backend evidence supports deterministic object replacement and unique lineage, but not truthful interpolation for split/drop/conflict/truncated/omitted objects. Those cases therefore remain fail-closed rather than visually guessed.
+
+Headed scheduling is now provenance-aware. Native run 1 records `visibilityState=hidden`, `hasFocus=false`, zero timing samples, and the blocker `Timed out waiting for visible focused headed frame window`. Native runs 2 and 3 bring the Tauri window into the visible/focused workspace; both record 120 real transition samples, 16/17 ms median/p95, 17 ms maximum, 23/28 ms topology commit latency, and no blur/visibility changes. Run 3 uses only a one-time focus handoff, proving continuous focus automation is not required. This narrows the Phase-37 multi-second outlier to the native window/workspace visibility/focus scheduling condition, while intentionally leaving compositor-vs-WebKit implementation detail unresolved.
+
+A separate headed Chromium runner uses production `GraphViewport` plus the authoritative preview-delta contracts and hardware WebGL (`ANGLE (Intel, Mesa Intel(R) Iris(R) Xe Graphics (RPL-P), OpenGL 4.6)`). Three visible/focused runs × 120 samples have 16.7 ms transition medians, 16.7/16.8/16.8 ms p95, 16.8 ms maxima, and 25.5/27.1/30.5 ms topology commit latency. Its report carries `nativeFpsClaim=false`; browser timing is never relabeled as native Tauri FPS.
+
+Headed projected-node accessibility is still fail-closed rather than overclaimed. Browser live-region evidence is green, but projected pressed/roving selection times out with `Timed out waiting for projected selected transformed node`; native records `Timed out waiting for projected authoritative transformed node`, and AT-SPI remains unavailable. DOM/unit/integration semantics, one-tab-stop roving, `aria-pressed`, conflict alerts, transformed-topology live regions, and keyboard authoring remain release-green.
+
+Phase-38 durable evidence:
+
+- `.ws-bridge/evidence/gitinspect-phase38-headed-run1.txt`
+- `.ws-bridge/evidence/gitinspect-phase38-headed-run2.txt`
+- `.ws-bridge/evidence/gitinspect-phase38-headed-run3.txt`
+- `.ws-bridge/evidence/gitinspect-phase38-headed-browser.txt`
+- `.ws-bridge/evidence/gitinspect-phase38-headed-runs.md`
+- `.ws-bridge/evidence/gitinspect-phase38-final.md`
+
+Fresh `pnpm release:verify` is green: graph-elements 48/48, app 149/149, workspace typechecks/lint/build, gitinspect-core fmt/clippy/all 68 tests, Tauri fmt/clippy/check and 23 binary tests, and `git diff --check`. Initial application JS is **359.31 kB minified / 106.99 kB gzip**, below the <1 MB startup gate; deferred GraphScene remains 1,034.30 kB / 280.95 kB gzip. Fresh 1k/10k/100k scale numbers remain CPU/planner/search instrumentation only and are recorded in the Phase-38 final evidence.
+
 ## Original-apply safety boundary
 
 Unchanged and explicit:
@@ -168,14 +193,14 @@ Unchanged and explicit:
 - mutation authorization continues to classify previewable rewrite operations as fail-closed for original execution;
 - Phase-28 through Phase-31 whole-source TOCTOU concerns remain unresolved and out of scope.
 
-Nothing in Phase 37 authorizes, exposes, or simulates original-repository mutation.
+Nothing in Phase 38 authorizes, exposes, or simulates original-repository mutation.
 
 ## Next bounded tranche
 
-Phase 38 should stay preview-only and focus on **headed GPU scheduling authority plus transformed-topology transition continuity**:
+Phase 39 should remain preview-only and focus on the remaining **headed projected-node accessibility / interaction determinism** without weakening visibility semantics:
 
-1. determine whether the Tauri/WebKit rAF stall is caused by view visibility/workspace throttling, compositor scheduling, or WebKit automation behavior, and obtain genuine headed frame cadence only if it can be measured without timer substitution;
-2. if native WebKit cannot provide reproducible cadence, add a separate explicitly headed hardware-WebGL GraphScene qualification runner and document its provenance rather than relabeling CPU timing as FPS;
-3. qualify old->new rewritten-node lineage/selection continuity and bounded visual transition behavior on representative large mutation deltas;
-4. keep semantic IDs, keyboard roving, live-region behavior, and bounded/fail-closed graph authority intact;
+1. determine why the camera-projected authoritative transformed node is not deterministically exposed to the headed accessibility overlay even when frame cadence is stable, and qualify `aria-pressed` + exactly one roving tab stop only if the real projected node is observable;
+2. if AT-SPI becomes available, add a bounded native accessibility-tree check; otherwise preserve the explicit environment blocker and do not claim screen-reader success;
+3. exercise keyboard traversal/context/selection continuity across representative unique rewrite, split, drop, stale, conflict, cancellation, and truncated-preview transitions without inventing ambiguous successors;
+4. retain the current provenance-aware native/browser headed timing gates and fail closed again if visibility/focus authority is lost;
 5. leave original-repository apply **NO-GO/unavailable**.
