@@ -14,18 +14,40 @@ describe("repositorySnapshotToGraphDataset", () => {
     const dataset = repositorySnapshotToGraphDataset(snapshot);
 
     expect(dataset.nodes.some((node) => node.id === gitGraphIds.head)).toBe(true);
-    expect(dataset.edges).toContainEqual(expect.objectContaining({
-      id: "head-symbolic:refs/heads/main",
-      source: gitGraphIds.head,
-      target: gitGraphIds.ref("refs/heads/main"),
-      kind: "head-symbolic",
-    }));
-    expect(dataset.edges).toContainEqual(expect.objectContaining({
-      source: gitGraphIds.ref("refs/heads/main"),
-      target: gitGraphIds.ref("refs/remotes/origin/main"),
-      kind: "remote-tracking",
-      directed: false,
-    }));
+    expect(dataset.edges).toContainEqual(
+      expect.objectContaining({
+        id: "head-symbolic:refs/heads/main",
+        source: gitGraphIds.head,
+        target: gitGraphIds.ref("refs/heads/main"),
+        kind: "head-symbolic",
+      }),
+    );
+    expect(dataset.edges).toContainEqual(
+      expect.objectContaining({
+        source: gitGraphIds.ref("refs/heads/main"),
+        target: gitGraphIds.ref("refs/remotes/origin/main"),
+        kind: "remote-tracking",
+        directed: false,
+      }),
+    );
+  });
+
+  it("marks only the resolved HEAD first-parent route as the active history path", () => {
+    const dataset = repositorySnapshotToGraphDataset(createDemoSnapshot("/work/example"));
+    const history = dataset.edges.filter(
+      (edge) => edge.kind === "history" || edge.kind === "merge-parent",
+    );
+    const active = history.filter((edge) => edge.properties.headPath === true);
+    const inactive = history.filter((edge) => edge.properties.headPath !== true);
+
+    expect(active).toHaveLength(4);
+    expect(active.every((edge) => edge.properties.firstParent === true)).toBe(true);
+    expect(inactive).toHaveLength(2);
+    expect(
+      inactive.some(
+        (edge) => edge.properties.parentIndex === 1 && edge.kind === "merge-parent",
+      ),
+    ).toBe(true);
   });
 
   it("is deterministic when repository records arrive in a different order", () => {

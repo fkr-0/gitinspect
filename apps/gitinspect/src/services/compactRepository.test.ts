@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyCompactRepositoryAppendDelta,
+  decodeCompactCommitBatch,
   decodeCompactRepositorySnapshot,
+  type CompactGitCommitBatch,
   type CompactGitRepositorySnapshot,
+  type CompactRepositoryAppendDelta,
 } from "./compactRepository";
 
 function fixture(): CompactGitRepositorySnapshot {
@@ -35,6 +39,82 @@ function fixture(): CompactGitRepositorySnapshot {
 }
 
 describe("compact repository transport", () => {
+  it("expands a commit-only batch for append-aware refresh", () => {
+    const batch: CompactGitCommitBatch = {
+      strings: ["child", "tree-child", "parent", "Scale Fixture", "child message"],
+      commits: [[0, 1, [2], 3, null, 2000, 2000, 4, 3]],
+    };
+
+    expect(decodeCompactCommitBatch(batch)).toEqual([
+      {
+        oid: "child",
+        treeOid: "tree-child",
+        parents: ["parent"],
+        authorName: "Scale Fixture",
+        authoredAtMs: 2000,
+        committedAtMs: 2000,
+        message: "child message",
+        signatureStatus: "unsigned",
+        files: [],
+      },
+    ]);
+  });
+
+  it("applies a validated append delta to the public snapshot exactly", () => {
+    const session = {
+      key: "repository:1",
+      snapshot: decodeCompactRepositorySnapshot(fixture()),
+    };
+    const refreshed = applyCompactRepositoryAppendDelta(session, {
+      baseRevision: "sha256:test",
+      baseHead: "child",
+      revision: "sha256:next",
+      head: "new-child",
+      headRef: "refs/heads/main",
+      commits: {
+        strings: ["new-child", "tree-new", "child", "Scale Fixture", "new message"],
+        commits: [[0, 1, [2], 3, null, 3000, 3000, 4, 3]],
+      },
+      refs: [{ name: "refs/heads/main", targetOid: "new-child", kind: "local-branch" }],
+      remotes: [],
+      hooks: [],
+      dropCommitCount: 1,
+      truncated: true,
+    });
+
+    expect(refreshed.snapshot.revision).toBe("sha256:next");
+    expect(refreshed.snapshot.commits.map((commit) => commit.oid)).toEqual(["new-child", "child"]);
+    expect(refreshed.snapshot.truncated).toBe(true);
+  });
+
+  it("fails closed on stale or non-linear append deltas", () => {
+    const session = {
+      key: "repository:1",
+      snapshot: decodeCompactRepositorySnapshot(fixture()),
+    };
+    const delta: CompactRepositoryAppendDelta = {
+      baseRevision: "sha256:test",
+      baseHead: "child",
+      revision: "sha256:next",
+      head: "new-child",
+      headRef: "refs/heads/main",
+      commits: {
+        strings: ["new-child", "tree-new", "wrong-parent", "Scale Fixture", "message"],
+        commits: [[0, 1, [2], 3, null, 3000, 3000, 4, 3]],
+      },
+      refs: [{ name: "refs/heads/main", targetOid: "new-child", kind: "local-branch" }],
+      remotes: [],
+      hooks: [],
+      dropCommitCount: 0,
+      truncated: false,
+    };
+
+    expect(() =>
+      applyCompactRepositoryAppendDelta(session, { ...delta, baseRevision: "sha256:stale" }),
+    ).toThrow(/base revision mismatch/i);
+    expect(() => applyCompactRepositoryAppendDelta(session, delta)).toThrow(/linear append/i);
+  });
+
   it("expands into the unchanged public metadata-only snapshot contract", () => {
     const snapshot = decodeCompactRepositorySnapshot(fixture());
     expect(snapshot.schemaVersion).toBe(1);

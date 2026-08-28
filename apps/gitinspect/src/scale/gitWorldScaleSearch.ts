@@ -1,8 +1,4 @@
-import type {
-  ElementId,
-  GraphDataset,
-  Vec3,
-} from "@gitinspect/graph-elements";
+import type { ElementId, GraphDataset, Vec3 } from "@gitinspect/graph-elements";
 
 import {
   GitSearchIndex,
@@ -13,11 +9,7 @@ import {
   type GitSearchOutcome,
   type GitSearchQuery,
 } from "../search/gitSearch";
-import {
-  GitScalePlanner,
-  type GitScaleModel,
-  type GitScalePlannerOptions,
-} from "./gitScale";
+import { GitScalePlanner, type GitScaleModel, type GitScalePlannerOptions } from "./gitScale";
 
 export interface GitWorldScaleSearchInput {
   readonly dataset: GraphDataset;
@@ -35,7 +27,9 @@ export interface GitWorldScaleSearchModel {
   readonly highlights: GitSearchHighlightOverlay;
 }
 
-function hasSearchText(query: GitWorldScaleSearchInput["search"]): query is Omit<GitSearchQuery, "filters"> & { readonly text: string } {
+function hasSearchText(
+  query: GitWorldScaleSearchInput["search"],
+): query is Omit<GitSearchQuery, "filters"> & { readonly text: string } {
   return typeof query?.text === "string" && query.text.trim().length > 0;
 }
 
@@ -60,7 +54,9 @@ export class GitWorldScaleSearchAdapter {
   }
 
   project(input: GitWorldScaleSearchInput): GitWorldScaleSearchModel {
-    const filter = input.filters ? this.searchIndex.filter(input.dataset, input.filters) : undefined;
+    const filter = input.filters
+      ? this.searchIndex.filter(input.dataset, input.filters)
+      : undefined;
     const search = hasSearchText(input.search)
       ? this.searchIndex.search(input.dataset, {
           ...input.search,

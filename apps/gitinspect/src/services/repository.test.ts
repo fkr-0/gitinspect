@@ -42,6 +42,23 @@ describe("demo repository adapter", () => {
         files: snapshot.commits[0]?.files ?? [],
         truncated: false,
       }),
+      getCommitFileDetail: async (_session, oid, path) => ({
+        oid,
+        path,
+        status: "modified",
+        kind: "text",
+        contentStatus: "text",
+        hunks: [
+          {
+            oldStart: 1,
+            oldLines: 1,
+            newStart: 1,
+            newLines: 1,
+            lines: [{ kind: "addition", newLine: 1, content: "native detail\n" }],
+          },
+        ],
+        truncated: false,
+      }),
       watchRepository: async (_session, onChange) => {
         watched = true;
         onChange({
@@ -53,15 +70,18 @@ describe("demo repository adapter", () => {
       },
     });
 
-    expect(
-      await service.chooseRepositoryPath({ mode: "folder", expectedKind: "worktree" }),
-    ).toBe("/native/example");
+    expect(await service.chooseRepositoryPath({ mode: "folder", expectedKind: "worktree" })).toBe(
+      "/native/example",
+    );
     expect(selection).toEqual({ mode: "folder", expectedKind: "worktree" });
     const session = await service.openRepository("/native/example");
     expect(session.key).toBe("native:repository-1");
     expect((await service.getCommitDiff(session, snapshot.commits[0]!.oid)).oid).toBe(
       snapshot.commits[0]!.oid,
     );
+    expect(
+      (await service.getCommitFileDetail(session, snapshot.commits[0]!.oid, "src/world.ts")).path,
+    ).toBe("src/world.ts");
     const stop = await service.watchRepository(session, () => undefined);
     expect(watched).toBe(true);
     await stop();

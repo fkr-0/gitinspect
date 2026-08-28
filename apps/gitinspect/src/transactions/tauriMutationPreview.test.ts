@@ -8,12 +8,10 @@ describe("Tauri mutation preview bridge", () => {
   });
 
   it("uses only the narrow sandbox-ID preview commands", async () => {
-    const invoke = vi.fn(
-      async (_command: string, _args?: Readonly<Record<string, unknown>>) => ({
-        sandboxId: "sandbox-1-1",
-        baseRevision: "r1",
-      }),
-    );
+    const invoke = vi.fn(async (_command: string, _args?: Readonly<Record<string, unknown>>) => ({
+      sandboxId: "sandbox-1-1",
+      baseRevision: "r1",
+    }));
     vi.stubGlobal("window", {
       __TAURI__: { core: { invoke } },
     });

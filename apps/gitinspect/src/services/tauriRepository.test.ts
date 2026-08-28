@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GitRepositorySnapshot } from "@gitinspect/contracts";
 
-import type {
-  CompactGitCommitRecord,
-  CompactGitRepositorySnapshot,
-} from "./compactRepository";
+import type { CompactGitCommitRecord, CompactGitRepositorySnapshot } from "./compactRepository";
 import { createDemoSnapshot } from "./repository";
 import { createTauriRepositoryService } from "./tauriRepository";
 
@@ -61,7 +58,9 @@ describe("Tauri repository bridge", () => {
     const snapshot = createDemoSnapshot("/native/repo");
     const compact = { key: "repository:1", snapshot: compactSnapshot(snapshot) };
     const invocations: Array<{ command: string; args: unknown }> = [];
-    let eventHandler: ((event: { event: string; id: number; payload: unknown }) => void) | undefined;
+    let eventHandler:
+      | ((event: { event: string; id: number; payload: unknown }) => void)
+      | undefined;
     const unlisten = vi.fn();
 
     vi.stubGlobal("window", {
@@ -70,20 +69,37 @@ describe("Tauri repository bridge", () => {
           invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
             invocations.push({ command, args });
             switch (command) {
-              case "choose_repository_path": return "/native/repo";
-              case "open_repository_compact": return compact;
-              case "refresh_repository_compact": return {
-                status: "unchanged",
-                revision: snapshot.revision,
-              };
-              case "get_commit_diff": return {
-                oid: snapshot.commits[0]!.oid,
-                files: snapshot.commits[0]!.files,
-                truncated: false,
-              };
-              case "start_repository_watch": return { watchId: "watch:1" };
-              case "stop_repository_watch": return undefined;
-              default: throw new Error(`unexpected command ${command}`);
+              case "choose_repository_path":
+                return "/native/repo";
+              case "open_repository_compact":
+                return compact;
+              case "refresh_repository_compact_delta":
+                return {
+                  status: "unchanged",
+                  revision: snapshot.revision,
+                };
+              case "get_commit_diff":
+                return {
+                  oid: snapshot.commits[0]!.oid,
+                  files: snapshot.commits[0]!.files,
+                  truncated: false,
+                };
+              case "get_commit_file_detail":
+                return {
+                  oid: snapshot.commits[0]!.oid,
+                  path: "src/world.ts",
+                  status: "modified",
+                  kind: "text",
+                  contentStatus: "text",
+                  hunks: [],
+                  truncated: false,
+                };
+              case "start_repository_watch":
+                return { watchId: "watch:1" };
+              case "stop_repository_watch":
+                return undefined;
+              default:
+                throw new Error(`unexpected command ${command}`);
             }
           }),
         },
@@ -107,6 +123,12 @@ describe("Tauri repository bridge", () => {
     expect(opened.snapshot.commits.every((commit) => commit.files.length === 0)).toBe(true);
     const diff = await service!.getCommitDiff(opened, snapshot.commits[0]!.oid);
     expect(diff.oid).toBe(snapshot.commits[0]!.oid);
+    const detail = await service!.getCommitFileDetail(
+      opened,
+      snapshot.commits[0]!.oid,
+      "src/world.ts",
+    );
+    expect(detail.path).toBe("src/world.ts");
 
     const changes: unknown[] = [];
     const stop = await service!.watchRepository(opened, (change) => changes.push(change));
@@ -131,7 +153,7 @@ describe("Tauri repository bridge", () => {
     await stop();
     expect(unlisten).toHaveBeenCalledTimes(1);
     expect(invocations).toContainEqual({
-      command: "refresh_repository_compact",
+      command: "refresh_repository_compact_delta",
       args: { repositoryId: opened.key, expectedRevision: snapshot.revision },
     });
     expect(invocations).toContainEqual({
@@ -141,6 +163,15 @@ describe("Tauri repository bridge", () => {
     expect(invocations).toContainEqual({
       command: "get_commit_diff",
       args: { repositoryId: opened.key, oid: snapshot.commits[0]!.oid, options: null },
+    });
+    expect(invocations).toContainEqual({
+      command: "get_commit_file_detail",
+      args: {
+        repositoryId: opened.key,
+        oid: snapshot.commits[0]!.oid,
+        path: "src/world.ts",
+        options: null,
+      },
     });
     expect(invocations.filter(({ command }) => command === "stop_repository_watch")).toEqual([
       { command: "stop_repository_watch", args: { watchId: "watch:1" } },

@@ -12,16 +12,22 @@ pub struct MutationPreviewState {
     manager: MutationSandboxManager,
 }
 
+impl MutationPreviewState {
+    pub(crate) fn with_root(root: PathBuf) -> Result<Self, String> {
+        MutationSandboxManager::new(root)
+            .map(|manager| Self { manager })
+            .map_err(|error| error.to_string())
+    }
+}
+
 impl Default for MutationPreviewState {
     fn default() -> Self {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../..")
             .join("target")
             .join("mutation-preview-sandboxes");
-        Self {
-            manager: MutationSandboxManager::new(root)
-                .expect("repository-local mutation preview sandbox root must be creatable"),
-        }
+        Self::with_root(root)
+            .expect("repository-local mutation preview sandbox root must be creatable")
     }
 }
 

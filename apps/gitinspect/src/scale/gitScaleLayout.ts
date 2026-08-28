@@ -1,16 +1,17 @@
 import type {
   ElementId,
   GraphDataset,
-  GraphEdgeRecord,
-  GraphNodeRecord,
   LayoutDiagnostic,
   LayoutResult,
   Vec3,
 } from "@gitinspect/graph-elements";
 
-import { layoutGitDataset } from "../domain/gitLayout";
+import {
+  GIT_RAILFIELD_GEOMETRY,
+  gitRailTopology,
+  layoutGitDataset,
+} from "../domain/gitLayout";
 
-const HISTORY_EDGE_KINDS = new Set(["history", "merge-parent"]);
 const TARGET_EDGE_KINDS = new Set(["ref-target", "tag-target", "stash-base"]);
 
 export type GitScaleLayoutMode = "direct" | "macro";
@@ -34,16 +35,6 @@ interface MacroBucket {
   readonly id: string;
   readonly index: number;
   readonly members: ElementId[];
-  committedAtMs: number;
-}
-
-interface CollapsedEdge {
-  readonly source: ElementId;
-  readonly target: ElementId;
-  readonly kind: string;
-  readonly directed: boolean;
-  memberEdgeCount: number;
-  firstParent: boolean;
 }
 
 function finiteNumber(value: unknown): number | undefined {
@@ -62,10 +53,6 @@ function hashStep(hash: number, value: string): number {
     next = Math.imul(next, 0x01000193) >>> 0;
   }
   return next >>> 0;
-}
-
-function stableHash(value: string, seed: number): number {
-  return hashStep((0x811c9dc5 ^ seed) >>> 0, value);
 }
 
 export function gitScaleTopologyKey(dataset: GraphDataset): string {
@@ -96,54 +83,6 @@ export function gitScaleTopologyKey(dataset: GraphDataset): string {
   return `${first.toString(16).padStart(8, "0")}${second.toString(16).padStart(8, "0")}`;
 }
 
-function commitGenerations(dataset: GraphDataset): ReadonlyMap<ElementId, number> {
-  const commits = new Set(
-    dataset.nodes.filter((node) => node.kind === "commit").map((node) => node.id),
-  );
-  const indegree = new Map<ElementId, number>();
-  const children = new Map<ElementId, ElementId[]>();
-  const generation = new Map<ElementId, number>();
-  for (const id of commits) {
-    indegree.set(id, 0);
-    children.set(id, []);
-    generation.set(id, 0);
-  }
-  for (const edge of dataset.edges) {
-    if (!HISTORY_EDGE_KINDS.has(edge.kind) || !commits.has(edge.source) || !commits.has(edge.target)) continue;
-    indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1);
-    children.get(edge.source)?.push(edge.target);
-  }
-  for (const values of children.values()) values.sort((left, right) => left.localeCompare(right));
-
-  const queue = [...commits]
-    .filter((id) => (indegree.get(id) ?? 0) === 0)
-    .sort((left, right) => left.localeCompare(right));
-  for (let cursor = 0; cursor < queue.length; cursor += 1) {
-    const current = queue[cursor];
-    if (!current) continue;
-    const currentGeneration = generation.get(current) ?? 0;
-    for (const child of children.get(current) ?? []) {
-      generation.set(child, Math.max(generation.get(child) ?? 0, currentGeneration + 1));
-      const nextIndegree = (indegree.get(child) ?? 1) - 1;
-      indegree.set(child, nextIndegree);
-      if (nextIndegree === 0) queue.push(child);
-    }
-  }
-
-  // Git commit history is acyclic. This fallback keeps malformed/synthetic cycles deterministic
-  // without recursing or blocking the large-history path.
-  let maxGeneration = 0;
-  for (const value of generation.values()) maxGeneration = Math.max(maxGeneration, value);
-  let fallbackGeneration = maxGeneration + 1;
-  for (const id of [...commits].sort((left, right) => left.localeCompare(right))) {
-    if ((indegree.get(id) ?? 0) > 0) {
-      generation.set(id, fallbackGeneration);
-      fallbackGeneration += 1;
-    }
-  }
-  return generation;
-}
-
 function boundsFor(positions: Readonly<Record<ElementId, Vec3>>): LayoutResult["bounds"] {
   const values = Object.values(positions);
   if (values.length === 0) return { min: [0, 0, 0], max: [0, 0, 0] };
@@ -168,11 +107,10 @@ function buildMacroLayout(
   dataset: GraphDataset,
   topologyKey: string,
   generationWindow: number,
-  seed: number,
 ): GitScaleLayoutResult {
-  const generations = commitGenerations(dataset);
+  const topology = gitRailTopology(dataset);
+  const generations = topology.generations;
   const buckets = new Map<number, MacroBucket>();
-  const bucketByCommit = new Map<ElementId, ElementId>();
 
   for (const node of dataset.nodes) {
     if (node.kind !== "commit") continue;
@@ -184,105 +122,36 @@ function buildMacroLayout(
         id: `scale-layout:commit-bucket:${index}`,
         index,
         members: [],
-        committedAtMs: 0,
       };
       buckets.set(index, bucket);
     }
     bucket.members.push(node.id);
-    bucket.committedAtMs = Math.max(
-      bucket.committedAtMs,
-      finiteNumber(node.properties.committedAtMs) ?? 0,
-    );
-    bucketByCommit.set(node.id, bucket.id);
   }
-
-  const macroNodes: GraphNodeRecord[] = [...buckets.values()]
-    .sort((left, right) => left.index - right.index)
-    .map((bucket) => {
-      bucket.members.sort((left, right) => left.localeCompare(right));
-      return {
-        id: bucket.id,
-        kind: "commit",
-        label: `${bucket.members.length} commits`,
-        group: "macro-history",
-        weight: bucket.members.length,
-        properties: {
-          committedAtMs: bucket.committedAtMs,
-          macroGeneration: bucket.index,
-          memberCount: bucket.members.length,
-        },
-      };
-    });
-  for (const node of dataset.nodes) {
-    if (node.kind !== "commit") macroNodes.push(node);
-  }
-
-  const endpoint = (id: ElementId): ElementId => bucketByCommit.get(id) ?? id;
-  const collapsed = new Map<string, CollapsedEdge>();
-  for (const edge of dataset.edges) {
-    const source = endpoint(edge.source);
-    const target = endpoint(edge.target);
-    if (source === target) continue;
-    const key = `${edge.kind}\u0000${source}\u0000${target}\u0000${edge.directed ? "1" : "0"}`;
-    let aggregate = collapsed.get(key);
-    if (!aggregate) {
-      aggregate = {
-        source,
-        target,
-        kind: edge.kind,
-        directed: edge.directed,
-        memberEdgeCount: 0,
-        firstParent: false,
-      };
-      collapsed.set(key, aggregate);
-    }
-    aggregate.memberEdgeCount += 1;
-    aggregate.firstParent ||= edge.properties.firstParent === true || edge.properties.parentIndex === 0;
-  }
-
-  const macroEdges: GraphEdgeRecord[] = [...collapsed.values()]
-    .sort((left, right) => {
-      const leftKey = `${left.kind}:${left.source}:${left.target}`;
-      const rightKey = `${right.kind}:${right.source}:${right.target}`;
-      return leftKey.localeCompare(rightKey);
-    })
-    .map((edge) => {
-      return {
-        id: `scale-layout-edge:${edge.kind}:${edge.source}:${edge.target}`,
-        source: edge.source,
-        target: edge.target,
-        kind: edge.kind,
-        directed: edge.directed,
-        properties: {
-          memberEdgeCount: edge.memberEdgeCount,
-          ...(edge.firstParent ? { firstParent: true, parentIndex: 0 } : {}),
-        },
-      };
-    });
-  const macroDataset: GraphDataset = {
-    revision: `${dataset.revision}:macro:${topologyKey}`,
-    nodes: macroNodes,
-    edges: macroEdges,
-  };
-  const macroLayout = layoutGitDataset(macroDataset, seed);
   const positions: Record<ElementId, Vec3> = {};
+  const generationValues = [...generations.values()];
+  const minGeneration = generationValues.length > 0 ? Math.min(...generationValues) : 0;
+  const maxGeneration = generationValues.length > 0 ? Math.max(...generationValues) : 0;
+  const minBucket = Math.floor(minGeneration / generationWindow);
+  const maxBucket = Math.floor(maxGeneration / generationWindow);
+  const bucketCenter = (minBucket + maxBucket) / 2;
+  const macroBucketSpacing = 4.8;
+  const macroInnerSpan = 4;
+  const xForGeneration = (generation: number): number => {
+    const bucket = Math.floor(generation / generationWindow);
+    const within = generation - bucket * generationWindow;
+    const normalized = generationWindow <= 1 ? 0.5 : within / (generationWindow - 1);
+    return (bucket - bucketCenter) * macroBucketSpacing + (normalized - 0.5) * macroInnerSpan;
+  };
 
-  for (const bucket of [...buckets.values()].sort((left, right) => left.index - right.index)) {
-    const macroPosition = macroLayout.nodePositions[bucket.id] ?? [0, 0, 0];
-    for (const id of bucket.members) {
-      const generation = generations.get(id) ?? 0;
-      const xOffset = ((stableHash(id, seed) % 9) - 4) * 0.52;
-      const zOffset = ((stableHash(id, seed ^ 0x9e3779b9) % 9) - 4) * 0.52;
-      positions[id] = [
-        macroPosition[0] + xOffset,
-        generation * 1.5,
-        macroPosition[2] + zOffset,
-      ];
-    }
-  }
   for (const node of dataset.nodes) {
-    if (node.kind === "commit") continue;
-    positions[node.id] = macroLayout.nodePositions[node.id] ?? node.positionHint ?? [0, 0, 0];
+    const generation = generations.get(node.id);
+    const lane = topology.laneByCommit.get(node.id);
+    if (generation === undefined || lane === undefined) continue;
+    positions[node.id] = [
+      xForGeneration(generation),
+      lane * GIT_RAILFIELD_GEOMETRY.branchLaneSpacing,
+      0,
+    ];
   }
 
   const targetBySource = new Map<ElementId, ElementId>();
@@ -291,36 +160,87 @@ function buildMacroLayout(
       targetBySource.set(edge.source, edge.target);
     }
   }
-  for (const node of dataset.nodes) {
-    if (node.kind !== "local-branch" && node.kind !== "remote-branch" && node.kind !== "tag" && node.kind !== "stash") {
-      continue;
+  const attachmentsByTarget = new Map<ElementId, ElementId[]>();
+  for (const [source, target] of targetBySource) {
+    const attached = attachmentsByTarget.get(target) ?? [];
+    attached.push(source);
+    attachmentsByTarget.set(target, attached);
+  }
+  const attachmentRank = (kind: string): number =>
+    kind === "local-branch" ? 0 : kind === "tag" ? 1 : kind === "remote-branch" ? 2 : 3;
+  for (const [target, ids] of attachmentsByTarget) {
+    const targetPosition = positions[target];
+    if (!targetPosition) continue;
+    const nodes = ids
+      .map((id) => dataset.nodes.find((node) => node.id === id))
+      .filter((node): node is NonNullable<typeof node> => node !== undefined)
+      .sort((left, right) => attachmentRank(left.kind) - attachmentRank(right.kind) || left.id.localeCompare(right.id));
+    const ordinalByKind = new Map<string, number>();
+    for (const node of nodes) {
+      const ordinal = ordinalByKind.get(node.kind) ?? 0;
+      ordinalByKind.set(node.kind, ordinal + 1);
+      const offset: Vec3 =
+        node.kind === "local-branch"
+          ? [0, 1.35 + ordinal * 0.54, GIT_RAILFIELD_GEOMETRY.localSignalDepth]
+          : node.kind === "remote-branch"
+            ? [0, -1.3 - ordinal * 0.5, GIT_RAILFIELD_GEOMETRY.remoteSignalDepth]
+            : node.kind === "tag"
+              ? [0, 1.1 + ordinal * 0.48, GIT_RAILFIELD_GEOMETRY.tagSignalDepth]
+              : [0, -1.15 - ordinal * 0.48, GIT_RAILFIELD_GEOMETRY.stashSignalDepth];
+      positions[node.id] = [
+        targetPosition[0] + offset[0],
+        targetPosition[1] + offset[1],
+        targetPosition[2] + offset[2],
+      ];
     }
-    const target = targetBySource.get(node.id);
-    const targetPosition = target ? positions[target] : undefined;
-    const own = positions[node.id];
-    if (!targetPosition || !own) continue;
-    const yOffset = node.kind === "stash" ? -1.2 : node.kind === "tag" ? 1.8 : 1;
-    positions[node.id] = [own[0], targetPosition[1] + yOffset, own[2]];
   }
 
   const head = dataset.nodes.find((node) => node.kind === "head");
   if (head) {
     const target = dataset.edges.find(
-      (edge) => edge.source === head.id && (edge.kind === "head-symbolic" || edge.kind === "head-resolved"),
+      (edge) =>
+        edge.source === head.id && (edge.kind === "head-symbolic" || edge.kind === "head-resolved"),
     )?.target;
     const targetPosition = target ? positions[target] : undefined;
-    const own = positions[head.id];
-    if (targetPosition && own) positions[head.id] = [own[0], targetPosition[1] + 3.2, own[2]];
+    if (targetPosition) {
+      positions[head.id] = [targetPosition[0], targetPosition[1] + 1.05, targetPosition[2] + 0.24];
+    }
   }
 
-  for (const node of dataset.nodes) {
-    if (node.kind !== "commit-boundary") continue;
-    const target = dataset.edges.find(
-      (edge) => edge.source === node.id && HISTORY_EDGE_KINDS.has(edge.kind),
-    )?.target;
-    const targetPosition = target ? positions[target] : undefined;
-    const own = positions[node.id];
-    if (targetPosition && own) positions[node.id] = [own[0], targetPosition[1] - 1.5, own[2]];
+  const remotes = dataset.nodes.filter((node) => node.kind === "remote").sort((a, b) => a.id.localeCompare(b.id));
+  remotes.forEach((remote, index) => {
+    const members = dataset.edges
+      .filter((edge) => edge.source === remote.id && edge.kind === "remote-membership")
+      .map((edge) => positions[edge.target])
+      .filter((position): position is Vec3 => position !== undefined);
+    const anchor: Vec3 =
+      members.length > 0
+        ? [
+            members.reduce((sum, point) => sum + point[0], 0) / members.length,
+            members.reduce((sum, point) => sum + point[1], 0) / members.length,
+            0,
+          ]
+        : [xForGeneration(maxGeneration), 0, 0];
+    positions[remote.id] = [
+      anchor[0] + index * 0.9,
+      anchor[1] - 1.15,
+      GIT_RAILFIELD_GEOMETRY.remotePlatformDepth,
+    ];
+  });
+
+  const unresolved = dataset.nodes
+    .filter((node) => positions[node.id] === undefined)
+    .sort((left, right) => left.id.localeCompare(right.id));
+  unresolved.forEach((node, index) => {
+    positions[node.id] = [
+      xForGeneration(maxGeneration) + 2.4,
+      (index - (unresolved.length - 1) / 2) * 1.1,
+      -0.35,
+    ];
+  });
+
+  for (const bucket of buckets.values()) {
+    bucket.members.sort((left, right) => left.localeCompare(right));
   }
 
   const clusters = [...buckets.values()]
@@ -330,7 +250,7 @@ function buildMacroLayout(
       memberIds: Object.freeze([...bucket.members]),
       layer: bucket.index,
     }));
-  const diagnostics: readonly LayoutDiagnostic[] = macroLayout.diagnostics;
+  const diagnostics: readonly LayoutDiagnostic[] = topology.diagnostics;
   return {
     layout: Object.freeze({
       nodePositions: Object.freeze(positions),
@@ -341,7 +261,7 @@ function buildMacroLayout(
     mode: "macro",
     topologyKey,
     logicalNodeCount: dataset.nodes.length,
-    layoutNodeCount: macroDataset.nodes.length,
+    layoutNodeCount: buckets.size + dataset.nodes.filter((node) => node.kind !== "commit").length,
   };
 }
 
@@ -363,5 +283,5 @@ export function layoutGitDatasetForScale(
       layoutNodeCount: dataset.nodes.length,
     };
   }
-  return buildMacroLayout(dataset, topologyKey, generationWindow, seed);
+  return buildMacroLayout(dataset, topologyKey, generationWindow);
 }

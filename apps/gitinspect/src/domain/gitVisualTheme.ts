@@ -8,6 +8,9 @@ export interface GitVisualTheme {
   readonly commit: {
     readonly plate: string;
     readonly mergePlate: string;
+    readonly stationCore: string;
+    readonly historyPort: string;
+    readonly mergePort: string;
     readonly textChange: string;
     readonly binaryChange: string;
     readonly tagShell: string;
@@ -28,8 +31,13 @@ export interface GitVisualTheme {
   };
   readonly head: string;
   readonly unresolved: string;
+  readonly focus: {
+    readonly selected: string;
+    readonly neighbor: string;
+  };
   readonly edge: {
     readonly history: string;
+    readonly activeHistory: string;
     readonly merge: string;
     readonly branch: string;
     readonly tag: string;
@@ -44,6 +52,9 @@ export const DEFAULT_GIT_VISUAL_THEME: GitVisualTheme = Object.freeze({
   commit: {
     plate: "#62707f",
     mergePlate: "#7a8794",
+    stationCore: "#c6d4dc",
+    historyPort: "#91a7b8",
+    mergePort: "#d5b0ff",
     textChange: "#e8c353",
     binaryChange: "#aa72de",
     tagShell: "#66d7d1",
@@ -69,8 +80,13 @@ export const DEFAULT_GIT_VISUAL_THEME: GitVisualTheme = Object.freeze({
   },
   head: "#fff17a",
   unresolved: "#77818c",
+  focus: {
+    selected: "#fff3a0",
+    neighbor: "#9cf2cb",
+  },
   edge: {
     history: "#718599",
+    activeHistory: "#9cf2cb",
     merge: "#a7b3c3",
     branch: "#64c990",
     tag: "#61d8d0",
@@ -81,69 +97,79 @@ export const DEFAULT_GIT_VISUAL_THEME: GitVisualTheme = Object.freeze({
   },
 });
 
-export const GIT_EDGE_STYLE_DEFINITIONS: Readonly<Record<string, EdgeStyleDefinition>> = Object.freeze({
-  ...DEFAULT_EDGE_STYLES,
-  "git-history": {
-    pattern: "solid",
-    animated: true,
-    animationSpeed: 0.22,
-    head: "arrow",
-    headScale: 0.7,
-  },
-  "git-merge": {
-    pattern: "solid",
-    animated: true,
-    animationSpeed: 0.32,
-    widthScale: 1.55,
-    head: "arrow",
-    headScale: 0.82,
-  },
-  "git-branch-pointer": {
-    pattern: "dashed",
-    dashSize: 0.48,
-    gapSize: 0.28,
-    head: "arrow",
-  },
-  "git-tag-pointer": {
-    pattern: "dotted",
-    dashSize: 0.08,
-    gapSize: 0.18,
-    head: "diamond",
-    headScale: 0.9,
-  },
-  "git-stash": {
-    pattern: "dashed",
-    pathForm: "wavy",
-    waveAmplitude: 0.3,
-    waveFrequency: 2.5,
-    waveSegments: 16,
-    head: "arrow",
-  },
-  "git-tracking": {
-    pattern: "dashed",
-    animated: true,
-    animationSpeed: 1.25,
-    dashSize: 0.36,
-    gapSize: 0.28,
-    head: "none",
-  },
-  "git-remote-membership": {
-    pattern: "dashed",
-    dashSize: 0.3,
-    gapSize: 0.4,
-    head: "arrow",
-    headScale: 0.65,
-  },
-  "git-head": {
-    pattern: "dashed",
-    animated: true,
-    animationSpeed: 1.6,
-    dashSize: 0.24,
-    gapSize: 0.2,
-    head: "arrow",
-    headScale: 1.05,
-  },
-});
+export const GIT_EDGE_STYLE_DEFINITIONS: Readonly<Record<string, EdgeStyleDefinition>> =
+  Object.freeze({
+    ...DEFAULT_EDGE_STYLES,
+    "git-history": {
+      pathForm: "polyline",
+      pattern: "solid",
+      head: "none",
+    },
+    "git-active-history": {
+      pathForm: "polyline",
+      pattern: "solid",
+      widthScale: 1.08,
+      head: "arrow",
+      headScale: 0.86,
+    },
+    "git-merge": {
+      pathForm: "polyline",
+      pattern: "solid",
+      widthScale: 1,
+      head: "arrow",
+      headScale: 0.78,
+    },
+    "git-branch-pointer": {
+      pathForm: "polyline",
+      pattern: "dashed",
+      dashSize: 0.48,
+      gapSize: 0.28,
+      head: "arrow",
+    },
+    "git-tag-pointer": {
+      pathForm: "polyline",
+      pattern: "dotted",
+      dashSize: 0.08,
+      gapSize: 0.18,
+      head: "diamond",
+      headScale: 0.9,
+    },
+    "git-stash": {
+      pattern: "dashed",
+      pathForm: "wavy",
+      waveAmplitude: 0.3,
+      waveFrequency: 2.5,
+      waveSegments: 16,
+      head: "arrow",
+    },
+    "git-tracking": {
+      pathForm: "polyline",
+      pattern: "dashed",
+      animated: true,
+      animationSpeed: 1.25,
+      dashSize: 0.36,
+      gapSize: 0.28,
+      head: "none",
+    },
+    "git-remote-membership": {
+      pathForm: "polyline",
+      pattern: "dashed",
+      dashSize: 0.3,
+      gapSize: 0.4,
+      head: "arrow",
+      headScale: 0.65,
+    },
+    "git-head": {
+      pathForm: "polyline",
+      pattern: "dashed",
+      animated: true,
+      animationSpeed: 1.6,
+      dashSize: 0.24,
+      gapSize: 0.2,
+      head: "arrow",
+      headScale: 1.05,
+    },
+  });
 
 export function createGitEdgeStyleRegistry(): EdgeStyleRegistry {
   return new EdgeStyleRegistry(GIT_EDGE_STYLE_DEFINITIONS);

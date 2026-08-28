@@ -6,8 +6,9 @@ use mutation_preview_commands::{
     create_mutation_sandbox, preview_mutation_transaction,
 };
 use repository_commands::{
-    AppState, choose_repository_path, get_commit_diff, open_repository, open_repository_compact,
-    refresh_repository, refresh_repository_compact, start_repository_watch, stop_repository_watch,
+    AppState, choose_repository_path, get_commit_diff, get_commit_file_detail, open_repository,
+    open_repository_compact, refresh_repository, refresh_repository_compact,
+    refresh_repository_compact_delta, start_repository_watch, stop_repository_watch,
 };
 
 fn main() {
@@ -20,7 +21,9 @@ fn main() {
             open_repository_compact,
             refresh_repository,
             refresh_repository_compact,
+            refresh_repository_compact_delta,
             get_commit_diff,
+            get_commit_file_detail,
             start_repository_watch,
             stop_repository_watch,
             create_mutation_sandbox,

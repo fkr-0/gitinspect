@@ -1,8 +1,4 @@
-import type {
-  ElementId,
-  GraphDataset,
-  GraphNodeRecord,
-} from "@gitinspect/graph-elements";
+import type { ElementId, GraphDataset, GraphNodeRecord } from "@gitinspect/graph-elements";
 
 export type GitSearchMode = "exact" | "substring" | "fuzzy";
 export type GitSignatureState = "valid" | "invalid" | "unknown" | "unsigned";
@@ -165,8 +161,9 @@ function signatureValue(value: unknown): GitSignatureState | undefined {
 }
 
 function uniqueNormalized(values: readonly (string | undefined)[]): readonly string[] {
-  return [...new Set(values.flatMap((value) => value ? [normalize(value)] : []).filter(Boolean))]
-    .sort((left, right) => left.localeCompare(right));
+  return [
+    ...new Set(values.flatMap((value) => (value ? [normalize(value)] : [])).filter(Boolean)),
+  ].sort((left, right) => left.localeCompare(right));
 }
 
 function packTerms(values: readonly (string | undefined)[]): string {
@@ -196,7 +193,11 @@ function fieldEntries(document: SearchDocument): readonly (readonly [SearchField
   ];
 }
 
-function matchedFields(document: SearchDocument, needle: string, exact: boolean): readonly string[] {
+function matchedFields(
+  document: SearchDocument,
+  needle: string,
+  exact: boolean,
+): readonly string[] {
   const matches = exact ? packedExact : packedSubstring;
   const result: SearchFieldName[] = [];
   if (matches(document.idText, needle)) result.push("id");
@@ -342,9 +343,23 @@ function matchesFilters(document: SearchDocument, filters: CompiledFilters | und
 
   if (!packedMatchesAny(document.authorText, filters.authors)) return false;
 
-  if ((filters.fromMs !== undefined || filters.toMs !== undefined) && document.committedAtMs === undefined) return false;
-  if (filters.fromMs !== undefined && document.committedAtMs !== undefined && document.committedAtMs < filters.fromMs) return false;
-  if (filters.toMs !== undefined && document.committedAtMs !== undefined && document.committedAtMs > filters.toMs) return false;
+  if (
+    (filters.fromMs !== undefined || filters.toMs !== undefined) &&
+    document.committedAtMs === undefined
+  )
+    return false;
+  if (
+    filters.fromMs !== undefined &&
+    document.committedAtMs !== undefined &&
+    document.committedAtMs < filters.fromMs
+  )
+    return false;
+  if (
+    filters.toMs !== undefined &&
+    document.committedAtMs !== undefined &&
+    document.committedAtMs > filters.toMs
+  )
+    return false;
 
   if (!packedMatchesAny(document.refsText, filters.refs)) return false;
 
@@ -358,7 +373,12 @@ function matchesFilters(document: SearchDocument, filters: CompiledFilters | und
   return true;
 }
 
-function clampInteger(value: number | undefined, fallback: number, min: number, max: number): number {
+function clampInteger(
+  value: number | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
   if (value === undefined || !Number.isFinite(value)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(value)));
 }
@@ -490,16 +510,20 @@ export class GitSearchIndex {
       documentsScanned += 1;
 
       if (needle.length === 0) {
-        if (results.length < limit) results.push({ id, score: 10, match: "filter", matchedFields: [] });
+        if (results.length < limit)
+          results.push({ id, score: 10, match: "filter", matchedFields: [] });
         continue;
       }
 
       if (mode === "exact" || mode === "substring") {
         const fields = matchedFields(document, needle, mode === "exact");
         if (fields.length === 0) continue;
-        const score = mode === "exact"
-          ? (fields.includes("id") ? 120 : 100)
-          : 60 + Math.min(20, needle.length) + (fields.includes("id") ? 5 : 0);
+        const score =
+          mode === "exact"
+            ? fields.includes("id")
+              ? 120
+              : 100
+            : 60 + Math.min(20, needle.length) + (fields.includes("id") ? 5 : 0);
         results.push({ id, score, match: mode, matchedFields: fields });
         continue;
       }

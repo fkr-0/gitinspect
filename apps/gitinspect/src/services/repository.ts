@@ -1,5 +1,6 @@
 import type {
   GitCommitDiff,
+  GitCommitFileDetail,
   GitCommitRecord,
   GitRepositorySnapshot,
 } from "@gitinspect/contracts";
@@ -31,6 +32,11 @@ export interface RepositoryService {
   openRepository(path: string): Promise<RepositorySession>;
   refreshRepository(session: RepositorySession): Promise<RepositorySession>;
   getCommitDiff(session: RepositorySession, oid: string): Promise<GitCommitDiff>;
+  getCommitFileDetail(
+    session: RepositorySession,
+    oid: string,
+    path: string,
+  ): Promise<GitCommitFileDetail>;
   watchRepository(
     session: RepositorySession,
     onChange: (change: RepositoryChange) => void,
@@ -235,6 +241,11 @@ export interface NativeRepositoryBridge {
   openRepository(path: string): Promise<RepositorySession>;
   refreshRepository(session: RepositorySession): Promise<RepositorySession>;
   getCommitDiff(session: RepositorySession, oid: string): Promise<GitCommitDiff>;
+  getCommitFileDetail(
+    session: RepositorySession,
+    oid: string,
+    path: string,
+  ): Promise<GitCommitFileDetail>;
   watchRepository(
     session: RepositorySession,
     onChange: (change: RepositoryChange) => void,
@@ -262,6 +273,14 @@ export class NativeRepositoryService implements RepositoryService {
     return this.bridge.getCommitDiff(session, oid);
   }
 
+  getCommitFileDetail(
+    session: RepositorySession,
+    oid: string,
+    path: string,
+  ): Promise<GitCommitFileDetail> {
+    return this.bridge.getCommitFileDetail(session, oid, path);
+  }
+
   watchRepository(
     session: RepositorySession,
     onChange: (change: RepositoryChange) => void,
@@ -282,6 +301,28 @@ export class DemoRepositoryService implements RepositoryService {
     return {
       key: `demo:${stableHash(snapshot.repositoryPath)}`,
       snapshot,
+    };
+  }
+
+  async getCommitFileDetail(
+    session: RepositorySession,
+    oid: string,
+    path: string,
+  ): Promise<GitCommitFileDetail> {
+    const commit = session.snapshot.commits.find((candidate) => candidate.oid === oid);
+    if (!commit) throw new Error(`Unknown demo commit: ${oid}`);
+    const file = commit.files.find((candidate) => candidate.path === path);
+    if (!file) throw new Error(`Path ${path} is not changed by demo commit ${oid}`);
+    return {
+      oid,
+      ...(commit.parents[0] ? { parentOid: commit.parents[0] } : {}),
+      path,
+      status: file.status,
+      kind: file.kind,
+      ...(file.bytes === undefined ? {} : { newBytes: file.bytes }),
+      contentStatus: "unavailable",
+      hunks: [],
+      truncated: false,
     };
   }
 

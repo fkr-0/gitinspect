@@ -13,3 +13,6 @@ gitinspect-core = { path = "../../../crates/gitinspect-core" }
 rfd = "0.15.4"
 serde = { version = "1.0", features = ["derive"] }
 tauri = { version = "2", features = [] }
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }

@@ -33,8 +33,12 @@ describe("Phase-5 scale benchmark instrumentation", () => {
       expect(result.retainedLogicalIdentityCount).toBeLessThanOrEqual(result.logicalNodeCount);
       expect(result.renderNodeCount).toBeLessThan(result.logicalNodeCount);
       expect(result.estimatedPlanBytes).toBeLessThan(result.logicalNodeCount * 256 + 2_000_000);
-      expect(result.estimatedProjectionBytes).toBeLessThan(result.logicalNodeCount * 128 + 2_000_000);
-      expect(result.estimatedSearchIndexBytes).toBeLessThan(result.logicalNodeCount * 2_048 + 10_000_000);
+      expect(result.estimatedProjectionBytes).toBeLessThan(
+        result.logicalNodeCount * 128 + 2_000_000,
+      );
+      expect(result.estimatedSearchIndexBytes).toBeLessThan(
+        result.logicalNodeCount * 2_048 + 10_000_000,
+      );
       expect(result.searchHitCount).toBe(1);
       expect(result.layoutMs).toBeLessThan(15_000);
       expect(result.topologyKeyMs).toBeLessThan(15_000);

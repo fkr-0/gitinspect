@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { GraphDataset, GraphNodeRecord } from "@gitinspect/graph-elements";
 
-import {
-  GitSearchIndex,
-  createSearchHighlightOverlay,
-} from "./gitSearch";
+import { GitSearchIndex, createSearchHighlightOverlay } from "./gitSearch";
 
-function node(id: string, kind: string, properties: GraphNodeRecord["properties"], label?: string): GraphNodeRecord {
+function node(
+  id: string,
+  kind: string,
+  properties: GraphNodeRecord["properties"],
+  label?: string,
+): GraphNodeRecord {
   return {
     id,
     kind,
@@ -19,41 +21,66 @@ function fixture(revision = "r1"): GraphDataset {
   return {
     revision,
     nodes: [
-      node("commit:a", "commit", {
-        oid: "a",
-        message: "Fix parser race",
-        authorName: "Ada Lovelace",
-        committedAtMs: 1_700_000_000_000,
-        signatureStatus: "valid",
-        localBranches: ["refs/heads/main"],
-        tags: ["refs/tags/v1.0.0"],
-        files: [{ path: "src/parser.ts", kind: "text", additions: 4, deletions: 1 }],
-        isMerge: false,
-      }, "Fix parser race"),
-      node("commit:b", "commit", {
-        oid: "b",
-        message: "Merge rendering work",
-        authorName: "Grace Hopper",
-        committedAtMs: 1_710_000_000_000,
-        signatureStatus: "unsigned",
-        remoteBranches: ["refs/remotes/origin/rendering"],
-        files: [],
-        isMerge: true,
-      }, "Merge rendering work"),
-      node("ref:refs/heads/main", "local-branch", {
-        name: "refs/heads/main",
-        targetOid: "a",
-        upstream: "refs/remotes/origin/main",
-      }, "main"),
-      node("ref:refs/tags/v1.0.0", "tag", {
-        name: "refs/tags/v1.0.0",
-        targetOid: "a",
-      }, "v1.0.0"),
-      node("remote:origin", "remote", {
-        name: "origin",
-        fetchUrls: ["ssh://example.invalid/gitinspect.git"],
-        pushUrls: ["ssh://example.invalid/gitinspect.git"],
-      }, "origin"),
+      node(
+        "commit:a",
+        "commit",
+        {
+          oid: "a",
+          message: "Fix parser race",
+          authorName: "Ada Lovelace",
+          committedAtMs: 1_700_000_000_000,
+          signatureStatus: "valid",
+          localBranches: ["refs/heads/main"],
+          tags: ["refs/tags/v1.0.0"],
+          files: [{ path: "src/parser.ts", kind: "text", additions: 4, deletions: 1 }],
+          isMerge: false,
+        },
+        "Fix parser race",
+      ),
+      node(
+        "commit:b",
+        "commit",
+        {
+          oid: "b",
+          message: "Merge rendering work",
+          authorName: "Grace Hopper",
+          committedAtMs: 1_710_000_000_000,
+          signatureStatus: "unsigned",
+          remoteBranches: ["refs/remotes/origin/rendering"],
+          files: [],
+          isMerge: true,
+        },
+        "Merge rendering work",
+      ),
+      node(
+        "ref:refs/heads/main",
+        "local-branch",
+        {
+          name: "refs/heads/main",
+          targetOid: "a",
+          upstream: "refs/remotes/origin/main",
+        },
+        "main",
+      ),
+      node(
+        "ref:refs/tags/v1.0.0",
+        "tag",
+        {
+          name: "refs/tags/v1.0.0",
+          targetOid: "a",
+        },
+        "v1.0.0",
+      ),
+      node(
+        "remote:origin",
+        "remote",
+        {
+          name: "origin",
+          fetchUrls: ["ssh://example.invalid/gitinspect.git"],
+          pushUrls: ["ssh://example.invalid/gitinspect.git"],
+        },
+        "origin",
+      ),
     ],
     edges: [],
   };
@@ -64,10 +91,16 @@ describe("GitSearchIndex", () => {
     const dataset = fixture();
     const index = new GitSearchIndex();
 
-    expect(index.search(dataset, { text: "refs/heads/main", mode: "exact" }).results.map((result) => result.id))
-      .toEqual(["commit:a", "ref:refs/heads/main"]);
-    expect(index.search(dataset, { text: "parser", mode: "substring" }).results.map((result) => result.id))
-      .toEqual(["commit:a"]);
+    expect(
+      index
+        .search(dataset, { text: "refs/heads/main", mode: "exact" })
+        .results.map((result) => result.id),
+    ).toEqual(["commit:a", "ref:refs/heads/main"]);
+    expect(
+      index
+        .search(dataset, { text: "parser", mode: "substring" })
+        .results.map((result) => result.id),
+    ).toEqual(["commit:a"]);
     const first = index.search(dataset, {
       text: "parsr",
       mode: "fuzzy",
@@ -103,11 +136,14 @@ describe("GitSearchIndex", () => {
     });
     expect(result.results.map((entry) => entry.id)).toEqual(["commit:a"]);
 
-    expect(index.search(dataset, { filters: { merge: true } }).results.map((entry) => entry.id))
-      .toEqual(["commit:b"]);
+    expect(
+      index.search(dataset, { filters: { merge: true } }).results.map((entry) => entry.id),
+    ).toEqual(["commit:b"]);
 
-    expect([...index.filter(dataset, { objectKinds: ["commit"] }).ids])
-      .toEqual(["commit:a", "commit:b"]);
+    expect([...index.filter(dataset, { objectKinds: ["commit"] }).ids]).toEqual([
+      "commit:a",
+      "commit:b",
+    ]);
   });
 
   it("reuses unchanged search documents across revision refreshes and invalidates changed nodes only", () => {

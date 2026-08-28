@@ -1,11 +1,125 @@
-import type {
-  GraphDataset,
-  GraphEdgeRecord,
-  GraphNodeRecord,
-} from "@gitinspect/graph-elements";
+import type { GraphDataset, GraphEdgeRecord, GraphNodeRecord } from "@gitinspect/graph-elements";
 
 function commitId(index: number): string {
   return `commit:${index.toString(16).padStart(12, "0")}`;
+}
+
+export function createSyntheticBranchingGitHistory(commitCount = 4_000): GraphDataset {
+  if (commitCount < 64) throw new Error("branching history requires at least 64 commits");
+  const base = createSyntheticGitHistory(commitCount);
+  const divergeIndex = Math.floor(commitCount * 0.35);
+  const mergeIndex = Math.floor(commitCount * 0.65);
+  const featureIds = ["commit:feature-scale-0", "commit:feature-scale-1"] as const;
+  const featureOids = [`${"f".repeat(39)}0`, `${"f".repeat(39)}1`] as const;
+  const nodes = base.nodes.map((node) => {
+    if (node.id !== commitId(mergeIndex)) return node;
+    const parents = Array.isArray(node.properties.parents)
+      ? node.properties.parents.filter((value): value is string => typeof value === "string")
+      : [];
+    return {
+      ...node,
+      group: "merge",
+      properties: {
+        ...node.properties,
+        parents: [...parents, featureOids[1]],
+        isMerge: true,
+      },
+    };
+  });
+  nodes.push(
+    {
+      id: featureIds[0],
+      kind: "commit",
+      label: "Scale feature peel",
+      group: "feature-scale",
+      properties: {
+        oid: featureOids[0],
+        parents: [oid(divergeIndex)],
+        committedAtMs: 1_700_000_000_000 + (divergeIndex + 1) * 60_000,
+        message: "Scale feature peel",
+        files: [],
+        tags: [],
+        localBranches: [],
+        remoteBranches: [],
+        isMerge: false,
+        isHead: false,
+      },
+    },
+    {
+      id: featureIds[1],
+      kind: "commit",
+      label: "Scale feature tip",
+      group: "feature-scale",
+      properties: {
+        oid: featureOids[1],
+        parents: [featureOids[0]],
+        committedAtMs: 1_700_000_000_000 + (divergeIndex + 2) * 60_000,
+        message: "Scale feature tip",
+        files: [],
+        tags: [],
+        localBranches: ["refs/heads/feature-scale"],
+        remoteBranches: [],
+        isMerge: false,
+        isHead: false,
+      },
+    },
+    {
+      id: "ref:refs/heads/feature-scale",
+      kind: "local-branch",
+      label: "feature-scale",
+      group: "refs",
+      properties: { name: "refs/heads/feature-scale", targetOid: featureOids[1] },
+    },
+  );
+  const edges = base.edges.map((edge) => {
+    const firstParent = edge.properties.firstParent === true || edge.properties.parentIndex === 0;
+    const withHeadPath =
+      (edge.kind === "history" || edge.kind === "merge-parent") && firstParent
+        ? { ...edge, properties: { ...edge.properties, headPath: true } }
+        : edge;
+    return withHeadPath.target === commitId(mergeIndex) && firstParent
+      ? { ...withHeadPath, kind: "merge-parent" }
+      : withHeadPath;
+  });
+  edges.push(
+    {
+      id: `history:${divergeIndex}:feature-scale:0`,
+      source: commitId(divergeIndex),
+      target: featureIds[0],
+      kind: "history",
+      directed: true,
+      properties: { parentIndex: 0, firstParent: true },
+    },
+    {
+      id: "history:feature-scale:0:1",
+      source: featureIds[0],
+      target: featureIds[1],
+      kind: "history",
+      directed: true,
+      properties: { parentIndex: 0, firstParent: true },
+    },
+    {
+      id: `history:feature-scale:1:${mergeIndex}:1`,
+      source: featureIds[1],
+      target: commitId(mergeIndex),
+      kind: "merge-parent",
+      directed: true,
+      properties: { parentIndex: 1, firstParent: false },
+    },
+    {
+      id: "ref-target:refs/heads/feature-scale",
+      source: "ref:refs/heads/feature-scale",
+      target: featureIds[1],
+      kind: "ref-target",
+      directed: true,
+      properties: { refKind: "local-branch" },
+    },
+  );
+  return Object.freeze({
+    revision: `${base.revision}:branching`,
+    nodes: Object.freeze(nodes.sort((left, right) => left.id.localeCompare(right.id))),
+    edges: Object.freeze(edges.sort((left, right) => left.id.localeCompare(right.id))),
+  });
 }
 
 function oid(index: number): string {
@@ -42,9 +156,17 @@ export function createSyntheticGitHistory(commitCount: number): GraphDataset {
         committedAtMs: startedAt + index * 60_000,
         message: `Synthetic commit ${index} touches subsystem ${index % 23}`,
         signatureStatus: index % 13 === 0 ? "valid" : "unsigned",
-        files: index % 37 === 0
-          ? [{ path: `src/module-${index % 101}.ts`, kind: "text", additions: index % 11, deletions: index % 5 }]
-          : [],
+        files:
+          index % 37 === 0
+            ? [
+                {
+                  path: `src/module-${index % 101}.ts`,
+                  kind: "text",
+                  additions: index % 11,
+                  deletions: index % 5,
+                },
+              ]
+            : [],
         tags: index > 0 && index % 10_000 === 0 ? [`refs/tags/checkpoint-${index}`] : [],
         localBranches: branchName ? [branchName] : [],
         remoteBranches: [],

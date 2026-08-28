@@ -58,7 +58,10 @@ function now(): number {
   return performance.now();
 }
 
-function mapProjection(model: GitScaleModel, mapper: DataMapper): {
+function mapProjection(
+  model: GitScaleModel,
+  mapper: DataMapper,
+): {
   readonly mappedVisualElementCount: number;
   readonly mappedEdgeCount: number;
 } {
@@ -82,11 +85,14 @@ export function benchmarkGitScale(input: GitScaleBenchmarkInput): GitScaleBenchm
   const indexStats = searchIndex.update(input.dataset);
   const searchIndexMs = now() - searchIndexStarted;
   const searchQueryStarted = now();
-  const search = searchIndex.search(input.dataset, input.searchQuery ?? {
-    text: "synthetic commit",
-    mode: "substring",
-    limit: 64,
-  });
+  const search = searchIndex.search(
+    input.dataset,
+    input.searchQuery ?? {
+      text: "synthetic commit",
+      mode: "substring",
+      limit: 64,
+    },
+  );
   const searchQueryMs = now() - searchQueryStarted;
   const searchMs = searchIndexMs + searchQueryMs;
   let fuzzyProbe: GitBoundedFuzzyBenchmarkResult | undefined;

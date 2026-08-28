@@ -1,6 +1,6 @@
 import {
-  TransactionManager,
   type TransactionDomainAdapter,
+  TransactionManager,
   type TransactionPreviewContext,
   type TransactionValidationContext,
 } from "@gitinspect/graph-elements";
@@ -124,6 +124,7 @@ class GitMutationDomainAdapter
 {
   private sandbox: GitMutationSandboxSession | undefined;
   private previewValue: GitMutationPreview | undefined;
+  private lifecycleGeneration = 0;
 
   constructor(
     private readonly repositoryId: string,
@@ -138,13 +139,23 @@ class GitMutationDomainAdapter
     context: TransactionPreviewContext<GitMutationPreviewOperation>,
   ): Promise<{ readonly preview: GitMutationPreview; readonly previewRevision: string }> {
     assertCopyTarget(context);
-    this.sandbox = await this.bridge.createSandbox(this.repositoryId, context.baseRevision);
+    const generation = ++this.lifecycleGeneration;
+    const sandbox = await this.bridge.createSandbox(this.repositoryId, context.baseRevision);
+    if (generation !== this.lifecycleGeneration) {
+      await this.bridge.cancelSandbox(sandbox.sandboxId);
+      throw new Error("Mutation preview was cancelled while creating its disposable sandbox.");
+    }
+    this.sandbox = sandbox;
     try {
       const preview = await this.bridge.preview(
-        this.sandbox.sandboxId,
+        sandbox.sandboxId,
         context.transactionId,
         context.operations,
       );
+      if (generation !== this.lifecycleGeneration) {
+        if (this.sandbox === sandbox) await this.cleanupSandbox();
+        throw new Error("Mutation preview was cancelled before the disposable preview completed.");
+      }
       if (
         preview.baseRevision !== context.baseRevision ||
         preview.transactionId !== context.transactionId
@@ -158,7 +169,7 @@ class GitMutationDomainAdapter
       }
       return { preview, previewRevision: preview.baseRevision };
     } catch (error) {
-      await this.cleanupSandbox();
+      if (this.sandbox === sandbox) await this.cleanupSandbox();
       throw error;
     }
   }
@@ -181,11 +192,22 @@ class GitMutationDomainAdapter
     if (!sandbox || !preview || preview !== context.preview) {
       throw new Error("Mutation preview sandbox is unavailable for confirmation.");
     }
-    const confirmation = await this.bridge.confirm(
-      sandbox.sandboxId,
-      context.transactionId,
-      preview.previewToken,
-    );
+    let confirmation: { readonly token: string };
+    try {
+      confirmation = await this.bridge.confirm(
+        sandbox.sandboxId,
+        context.transactionId,
+        preview.previewToken,
+      );
+    } catch (error) {
+      try {
+        await this.cleanupSandbox();
+      } catch {
+        // Preserve the confirmation failure as the primary error. The backend
+        // sandbox manager also owns bounded process-lifetime cleanup.
+      }
+      throw error;
+    }
     await this.cleanupSandbox();
     return confirmation;
   }
@@ -196,6 +218,7 @@ class GitMutationDomainAdapter
   }
 
   async cancel(): Promise<void> {
+    this.lifecycleGeneration += 1;
     await this.cleanupSandbox();
   }
 

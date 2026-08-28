@@ -1,8 +1,9 @@
-import type { GitCommitDiff } from "@gitinspect/contracts";
+import type { GitCommitDiff, GitCommitFileDetail } from "@gitinspect/contracts";
 
 import {
+  applyCompactRepositoryAppendDelta,
   decodeCompactRepositorySession,
-  type CompactRepositoryRefreshResult,
+  type CompactRepositoryDeltaRefreshResult,
   type CompactRepositorySession,
 } from "./compactRepository";
 import {
@@ -25,10 +26,7 @@ interface TauriGlobal {
     invoke<T>(command: string, args?: Readonly<Record<string, unknown>>): Promise<T>;
   };
   readonly event: {
-    listen<T>(
-      event: string,
-      handler: (event: TauriEvent<T>) => void,
-    ): Promise<() => void>;
+    listen<T>(event: string, handler: (event: TauriEvent<T>) => void): Promise<() => void>;
   };
 }
 
@@ -65,8 +63,8 @@ export function createTauriRepositoryService(): RepositoryService | undefined {
     },
 
     async refreshRepository(session: RepositorySession): Promise<RepositorySession> {
-      const result = await tauri.core.invoke<CompactRepositoryRefreshResult>(
-        "refresh_repository_compact",
+      const result = await tauri.core.invoke<CompactRepositoryDeltaRefreshResult>(
+        "refresh_repository_compact_delta",
         {
           repositoryId: session.key,
           expectedRevision: session.snapshot.revision,
@@ -80,6 +78,9 @@ export function createTauriRepositoryService(): RepositoryService | undefined {
         }
         return session;
       }
+      if (result.status === "delta") {
+        return applyCompactRepositoryAppendDelta(session, result.delta);
+      }
       return decodeCompactRepositorySession(result.session);
     },
 
@@ -87,6 +88,19 @@ export function createTauriRepositoryService(): RepositoryService | undefined {
       return tauri.core.invoke<GitCommitDiff>("get_commit_diff", {
         repositoryId: session.key,
         oid,
+        options: null,
+      });
+    },
+
+    getCommitFileDetail(
+      session: RepositorySession,
+      oid: string,
+      path: string,
+    ): Promise<GitCommitFileDetail> {
+      return tauri.core.invoke<GitCommitFileDetail>("get_commit_file_detail", {
+        repositoryId: session.key,
+        oid,
+        path,
         options: null,
       });
     },

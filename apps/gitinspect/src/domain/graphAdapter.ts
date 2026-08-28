@@ -1,12 +1,5 @@
-import type {
-  GitRefRecord,
-  GitRepositorySnapshot,
-} from "@gitinspect/contracts";
-import type {
-  GraphDataset,
-  GraphEdgeRecord,
-  GraphNodeRecord,
-} from "@gitinspect/graph-elements";
+import type { GitRefRecord, GitRepositorySnapshot } from "@gitinspect/contracts";
+import type { GraphDataset, GraphEdgeRecord, GraphNodeRecord } from "@gitinspect/graph-elements";
 
 type SnapshotWithHeadRef = GitRepositorySnapshot & {
   readonly headRef?: string;
@@ -47,17 +40,34 @@ function targetNodeId(
   return gitGraphIds.object(oid);
 }
 
-export function repositorySnapshotToGraphDataset(
-  snapshot: GitRepositorySnapshot,
-): GraphDataset {
+function headFirstParentEdges(snapshot: GitRepositorySnapshot): ReadonlySet<string> {
+  const commitsByOid = new Map(snapshot.commits.map((commit) => [commit.oid, commit] as const));
+  const result = new Set<string>();
+  let cursor = snapshot.head;
+  const visited = new Set<string>();
+  while (cursor && !visited.has(cursor)) {
+    visited.add(cursor);
+    const commit = commitsByOid.get(cursor);
+    const parent = commit?.parents[0];
+    if (!commit || !parent) break;
+    result.add(`${parent}\u0000${commit.oid}`);
+    cursor = parent;
+  }
+  return result;
+}
+
+export function repositorySnapshotToGraphDataset(snapshot: GitRepositorySnapshot): GraphDataset {
   const headRef = (snapshot as SnapshotWithHeadRef).headRef;
+  const activeHistory = headFirstParentEdges(snapshot);
   const loadedCommitOids = new Set(snapshot.commits.map((commit) => commit.oid));
   const boundaryCommitOids = new Set(
-    snapshot.commits.flatMap((commit) => commit.parents)
+    snapshot.commits
+      .flatMap((commit) => commit.parents)
       .filter((oid) => !loadedCommitOids.has(oid)),
   );
   const unresolvedObjectOids = new Set(
-    snapshot.refs.map((ref) => ref.targetOid)
+    snapshot.refs
+      .map((ref) => ref.targetOid)
       .filter((oid) => !loadedCommitOids.has(oid) && !boundaryCommitOids.has(oid)),
   );
   if (
@@ -163,18 +173,21 @@ export function repositorySnapshotToGraphDataset(
     },
   }));
 
-  const headNodes: GraphNodeRecord[] = snapshot.head || headRef
-    ? [{
-        id: gitGraphIds.head,
-        kind: "head",
-        label: "HEAD",
-        group: "refs",
-        properties: {
-          targetOid: snapshot.head,
-          symbolicTarget: headRef,
-        },
-      }]
-    : [];
+  const headNodes: GraphNodeRecord[] =
+    snapshot.head || headRef
+      ? [
+          {
+            id: gitGraphIds.head,
+            kind: "head",
+            label: "HEAD",
+            group: "refs",
+            properties: {
+              targetOid: snapshot.head,
+              symbolicTarget: headRef,
+            },
+          },
+        ]
+      : [];
 
   const historyEdges: GraphEdgeRecord[] = snapshot.commits.flatMap((commit) =>
     commit.parents.map((parentOid, parentIndex) => ({
@@ -187,6 +200,8 @@ export function repositorySnapshotToGraphDataset(
       properties: {
         parentIndex,
         firstParent: parentIndex === 0,
+        headPath:
+          parentIndex === 0 && activeHistory.has(`${parentOid}\u0000${commit.oid}`),
       },
     })),
   );
@@ -195,11 +210,7 @@ export function repositorySnapshotToGraphDataset(
     id: `ref-target:${ref.name}`,
     source: gitGraphIds.ref(ref.name),
     target: targetNodeId(ref.targetOid, loadedCommitOids, boundaryCommitOids),
-    kind: ref.kind === "tag"
-      ? "tag-target"
-      : ref.kind === "stash"
-        ? "stash-base"
-        : "ref-target",
+    kind: ref.kind === "tag" ? "tag-target" : ref.kind === "stash" ? "stash-base" : "ref-target",
     directed: true,
     properties: {
       refKind: ref.kind,
@@ -228,37 +239,44 @@ export function repositorySnapshotToGraphDataset(
   const remoteMembershipEdges: GraphEdgeRecord[] = snapshot.refs.flatMap((ref) => {
     const remote = remoteForRef(ref.name);
     if (!remote || !knownRemotes.has(remote)) return [];
-    return [{
-      id: `remote-membership:${remote}:${ref.name}`,
-      source: gitGraphIds.remote(remote),
-      target: gitGraphIds.ref(ref.name),
-      kind: "remote-membership",
-      directed: true,
-      properties: { remote, ref: ref.name },
-    }];
+    return [
+      {
+        id: `remote-membership:${remote}:${ref.name}`,
+        source: gitGraphIds.remote(remote),
+        target: gitGraphIds.ref(ref.name),
+        kind: "remote-membership",
+        directed: true,
+        properties: { remote, ref: ref.name },
+      },
+    ];
   });
 
-  const headEdges: GraphEdgeRecord[] = headNodes.length === 0
-    ? []
-    : headRef && refsByName.has(headRef)
-      ? [{
-          id: `head-symbolic:${headRef}`,
-          source: gitGraphIds.head,
-          target: gitGraphIds.ref(headRef),
-          kind: "head-symbolic",
-          directed: true,
-          properties: { symbolicTarget: headRef, targetOid: snapshot.head },
-        }]
-      : snapshot.head
-        ? [{
-            id: `head-resolved:${snapshot.head}`,
-            source: gitGraphIds.head,
-            target: targetNodeId(snapshot.head, loadedCommitOids, boundaryCommitOids),
-            kind: "head-resolved",
-            directed: true,
-            properties: { targetOid: snapshot.head },
-          }]
-        : [];
+  const headEdges: GraphEdgeRecord[] =
+    headNodes.length === 0
+      ? []
+      : headRef && refsByName.has(headRef)
+        ? [
+            {
+              id: `head-symbolic:${headRef}`,
+              source: gitGraphIds.head,
+              target: gitGraphIds.ref(headRef),
+              kind: "head-symbolic",
+              directed: true,
+              properties: { symbolicTarget: headRef, targetOid: snapshot.head },
+            },
+          ]
+        : snapshot.head
+          ? [
+              {
+                id: `head-resolved:${snapshot.head}`,
+                source: gitGraphIds.head,
+                target: targetNodeId(snapshot.head, loadedCommitOids, boundaryCommitOids),
+                kind: "head-resolved",
+                directed: true,
+                properties: { targetOid: snapshot.head },
+              },
+            ]
+          : [];
 
   const nodes = [
     ...commitNodes,

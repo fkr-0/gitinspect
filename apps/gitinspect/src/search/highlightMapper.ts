@@ -59,7 +59,11 @@ export function createSearchHighlightMapper<
     },
     ...(base.relatedSelectionIds
       ? {
-          relatedSelectionIds(selection: SelectionState, dataset: Parameters<NonNullable<typeof base.relatedSelectionIds>>[1]) {
+          relatedSelectionIds(
+            selection: SelectionState,
+            dataset: Parameters<NonNullable<typeof base.relatedSelectionIds>>[1],
+          ) {
+            // biome-ignore lint/style/noNonNullAssertion: guarded by truthy check on base.relatedSelectionIds
             return base.relatedSelectionIds!(selection, dataset);
           },
         }
@@ -67,6 +71,7 @@ export function createSearchHighlightMapper<
     ...(base.childWorld
       ? {
           childWorld(node: TNode, context: MappingContext<TNode, TEdge>) {
+            // biome-ignore lint/style/noNonNullAssertion: guarded by truthy check on base.childWorld
             return base.childWorld!(node, context);
           },
         }

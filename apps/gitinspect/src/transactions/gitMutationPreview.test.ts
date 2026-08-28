@@ -96,6 +96,41 @@ describe("Git mutation preview transaction adapter", () => {
     expect(backend.cancelSandbox).toHaveBeenCalledTimes(1);
   });
 
+  it("cancels a sandbox that finishes creating after the transaction was cancelled", async () => {
+    let resolveSandbox: ((value: { sandboxId: string; baseRevision: string }) => void) | undefined;
+    const backend = bridge();
+    backend.createSandbox.mockImplementation(
+      async () =>
+        new Promise((resolve) => {
+          resolveSandbox = resolve;
+        }),
+    );
+    const manager = createGitMutationPreviewTransaction(session, backend, "tx-race");
+    manager.addOperation({ kind: "branch-create", name: "topic" });
+
+    const pending = manager.preview(revision);
+    await vi.waitFor(() => expect(backend.createSandbox).toHaveBeenCalledTimes(1));
+    await manager.cancel();
+    resolveSandbox?.({ sandboxId: "sandbox-late", baseRevision: revision });
+
+    await expect(pending).rejects.toThrow("cancelled while creating its disposable sandbox");
+    expect(backend.preview).not.toHaveBeenCalled();
+    expect(backend.cancelSandbox).toHaveBeenCalledWith("sandbox-late");
+    expect(backend.confirm).not.toHaveBeenCalled();
+  });
+
+  it("cleans the disposable sandbox when backend confirmation fails", async () => {
+    const backend = bridge();
+    backend.confirm.mockRejectedValueOnce(new Error("stale confirmation"));
+    const manager = createGitMutationPreviewTransaction(session, backend, "tx-confirm-failure");
+    manager.addOperation({ kind: "branch-create", name: "topic" });
+    await manager.preview(revision);
+
+    await expect(manager.confirm(revision)).rejects.toThrow("stale confirmation");
+    expect(manager.state).toBe("failed");
+    expect(backend.cancelSandbox).toHaveBeenCalledWith("sandbox-1-1");
+  });
+
   it("refuses confirmation for structured conflicts and cleans up on cancellation", async () => {
     const backend = bridge(preview(false));
     const manager = createGitMutationPreviewTransaction(session, backend, "tx-safe");

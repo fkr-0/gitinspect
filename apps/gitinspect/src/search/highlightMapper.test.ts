@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type {
-  DataMapper,
-  GraphDataset,
-  MappingContext,
-} from "@gitinspect/graph-elements";
+import type { DataMapper, GraphDataset, MappingContext } from "@gitinspect/graph-elements";
 
 import type { GitSearchHighlightOverlay } from "./gitSearch";
 import { createSearchHighlightMapper } from "./highlightMapper";
@@ -52,6 +48,7 @@ describe("createSearchHighlightMapper", () => {
       interactionKey: "commit:a",
     });
   });
+
   it("preserves an active related-selection resolver while decorating visuals", () => {
     const dataset: GraphDataset = {
       revision: "r-relations",

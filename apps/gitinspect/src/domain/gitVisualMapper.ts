@@ -13,12 +13,15 @@ import type {
 
 import { gitGraphIds } from "./graphAdapter";
 import {
-  DEFAULT_GIT_VISUAL_THEME,
-  type GitVisualTheme,
-} from "./gitVisualTheme";
+  gitTopologyFocusLevel,
+  type GitTopologyContext,
+} from "./gitTopology";
+import { DEFAULT_GIT_VISUAL_THEME, type GitVisualTheme } from "./gitVisualTheme";
 
 function strings(value: unknown): readonly string[] {
-  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
 }
 
 function fileChanges(value: unknown): readonly GitCommitFileChange[] {
@@ -26,10 +29,12 @@ function fileChanges(value: unknown): readonly GitCommitFileChange[] {
   return value.filter((entry): entry is GitCommitFileChange => {
     if (!entry || typeof entry !== "object") return false;
     const candidate = entry as Partial<GitCommitFileChange>;
-    return typeof candidate.path === "string" &&
+    return (
+      typeof candidate.path === "string" &&
       (candidate.kind === "text" || candidate.kind === "binary") &&
       typeof candidate.additions === "number" &&
-      typeof candidate.deletions === "number";
+      typeof candidate.deletions === "number"
+    );
   });
 }
 
@@ -49,11 +54,7 @@ function commitFileOffset(index: number): readonly [number, number, number] {
   const columns = 7;
   const column = index % columns;
   const row = Math.floor(index / columns);
-  return [
-    -1.25 + column * 0.42,
-    0.36 + row * 0.12,
-    -0.52 + (row % 3) * 0.52,
-  ];
+  return [-1.25 + column * 0.42, 0.36 + row * 0.12, -0.52 + (row % 3) * 0.52];
 }
 
 function fileScale(file: GitCommitFileChange): readonly [number, number, number] {
@@ -75,8 +76,12 @@ function commitDescriptor(node: GraphNodeRecord, theme: GitVisualTheme): NodeVis
   const tags = strings(node.properties.tags);
   const localBranches = strings(node.properties.localBranches);
   const remoteBranches = strings(node.properties.remoteBranches);
+  const parents = strings(node.properties.parents);
   const isMerge = node.properties.isMerge === true;
-  const signature = text(node.properties.signatureStatus, "unknown") as keyof GitVisualTheme["commit"]["signature"];
+  const signature = text(
+    node.properties.signatureStatus,
+    "unknown",
+  ) as keyof GitVisualTheme["commit"]["signature"];
   const plateThickness = 0.18 + clamp(Math.log1p(message.length) / 20, 0, 0.32);
   const plateWidth = isMerge ? 3.4 : 2.8;
   const elements: VisualElementDescriptor[] = [
@@ -89,7 +94,40 @@ function commitDescriptor(node: GraphNodeRecord, theme: GitVisualTheme): NodeVis
       interactionKey: node.id,
       metadata: { role: "commit-plate", oid, messageLength: message.length, isMerge },
     },
+    {
+      id: `${node.id}:station-core`,
+      primitive: "cylinder",
+      position: [0, plateThickness / 2 + 0.15, 0],
+      scale: [0.38, 0.24, 0.38],
+      color: theme.commit.stationCore,
+      emissive: "#26333a",
+      interactionKey: node.id,
+      metadata: { role: "history-station-core", isMerge },
+    },
+    {
+      id: `${node.id}:child-port`,
+      primitive: "sphere",
+      position: [plateWidth / 2 + 0.08, plateThickness / 2 + 0.12, 0],
+      scale: [0.2, 0.2, 0.2],
+      color: theme.commit.historyPort,
+      emissive: "#1d2a33",
+      interactionKey: node.id,
+      metadata: { role: "history-port", direction: "newer" },
+    },
   ];
+
+  if (parents.length > 0) {
+    elements.push({
+      id: `${node.id}:parent-port`,
+      primitive: "sphere",
+      position: [-plateWidth / 2 - 0.08, plateThickness / 2 + 0.12, 0],
+      scale: [0.2, 0.2, 0.2],
+      color: theme.commit.historyPort,
+      emissive: "#1d2a33",
+      interactionKey: node.id,
+      metadata: { role: "history-port", direction: "older", parentIndex: 0 },
+    });
+  }
 
   files.forEach((file, index) => {
     const [x, y, z] = commitFileOffset(index);
@@ -153,16 +191,28 @@ function commitDescriptor(node: GraphNodeRecord, theme: GitVisualTheme): NodeVis
   });
 
   if (isMerge) {
-    elements.push({
-      id: `${node.id}:merge-notch`,
-      primitive: "octahedron",
-      position: [0, plateThickness / 2 + 0.34, -0.7],
-      scale: [0.24, 0.24, 0.24],
-      color: theme.commit.mergePlate,
-      emissive: "#303844",
-      interactionKey: node.id,
-      metadata: { role: "merge-indicator" },
-    });
+    elements.push(
+      {
+        id: `${node.id}:merge-port`,
+        primitive: "sphere",
+        position: [-plateWidth / 2 - 0.08, plateThickness / 2 + 0.12, 0.5],
+        scale: [0.24, 0.24, 0.24],
+        color: theme.commit.mergePort,
+        emissive: "#30273c",
+        interactionKey: node.id,
+        metadata: { role: "merge-parent-port", parentIndex: 1 },
+      },
+      {
+        id: `${node.id}:merge-notch`,
+        primitive: "octahedron",
+        position: [0, plateThickness / 2 + 0.34, -0.7],
+        scale: [0.24, 0.24, 0.24],
+        color: theme.commit.mergePlate,
+        emissive: "#303844",
+        interactionKey: node.id,
+        metadata: { role: "merge-indicator" },
+      },
+    );
   }
 
   elements.push({
@@ -175,8 +225,14 @@ function commitDescriptor(node: GraphNodeRecord, theme: GitVisualTheme): NodeVis
     metadata: { role: "signature", status: signature },
   });
 
-  const date = committedAtMs > 0 ? new Date(committedAtMs).toISOString().slice(0, 10) : "date unavailable";
-  const labelLines = [oid.slice(0, 10), author, date, node.label ?? message.split("\n", 1)[0] ?? ""];
+  const date =
+    committedAtMs > 0 ? new Date(committedAtMs).toISOString().slice(0, 10) : "date unavailable";
+  const labelLines = [
+    oid.slice(0, 10),
+    author,
+    date,
+    node.label ?? message.split("\n", 1)[0] ?? "",
+  ];
   labelLines.forEach((label, index) => {
     elements.push({
       id: `${node.id}:label:${index}`,
@@ -202,6 +258,17 @@ function simpleNodeDescriptor(node: GraphNodeRecord, theme: GitVisualTheme): Nod
       const color = remote ? theme.ref.remote : theme.ref.local;
       elements.push(
         {
+          id: `${node.id}:stem`,
+          primitive: "cylinder",
+          position: [0, -0.72, 0],
+          scale: [0.08, 1, 0.08],
+          color,
+          emissive: remote ? "#0b1a29" : "#0c2419",
+          opacity: remote ? 0.64 : 0.82,
+          interactionKey,
+          metadata: { role: "ref-stem", remote },
+        },
+        {
           id: `${node.id}:body`,
           primitive: "cylinder",
           scale: [0.48, 1.25, 0.48],
@@ -225,18 +292,41 @@ function simpleNodeDescriptor(node: GraphNodeRecord, theme: GitVisualTheme): Nod
       break;
     }
     case "tag":
-      elements.push({
-        id: `${node.id}:tag`,
-        primitive: "octahedron",
-        scale: [0.72, 0.72, 0.72],
-        color: theme.ref.tag,
-        emissive: "#123b39",
-        interactionKey,
-        metadata: {
-          role: "tag",
-          annotationDetailsAvailable: node.properties.annotationDetailsAvailable === true,
+      elements.push(
+        {
+          id: `${node.id}:stem`,
+          primitive: "cylinder",
+          position: [0, -0.55, 0],
+          scale: [0.07, 0.8, 0.07],
+          color: theme.ref.tag,
+          emissive: "#102c2b",
+          opacity: 0.82,
+          interactionKey,
+          metadata: { role: "ref-stem", refKind: "tag" },
         },
-      });
+        {
+          id: `${node.id}:tag`,
+          primitive: "octahedron",
+          scale: [0.72, 0.72, 0.72],
+          color: theme.ref.tag,
+          emissive: "#123b39",
+          interactionKey,
+          metadata: {
+            role: "tag",
+            annotationDetailsAvailable: node.properties.annotationDetailsAvailable === true,
+          },
+        },
+        {
+          id: `${node.id}:tag-tab`,
+          primitive: "box",
+          position: [0.58, 0.08, 0],
+          scale: [0.62, 0.16, 0.32],
+          color: theme.ref.tag,
+          opacity: 0.72,
+          interactionKey,
+          metadata: { role: "tag-tab" },
+        },
+      );
       break;
     case "stash":
       elements.push({
@@ -274,15 +364,37 @@ function simpleNodeDescriptor(node: GraphNodeRecord, theme: GitVisualTheme): Nod
       );
       break;
     case "head":
-      elements.push({
-        id: `${node.id}:focus`,
-        primitive: "octahedron",
-        scale: [0.52, 0.74, 0.52],
-        color: theme.head,
-        emissive: "#5c5320",
-        interactionKey,
-        metadata: { role: "head-focus" },
-      });
+      elements.push(
+        {
+          id: `${node.id}:stem`,
+          primitive: "cylinder",
+          position: [0, -0.52, 0],
+          scale: [0.07, 0.72, 0.07],
+          color: theme.head,
+          emissive: "#4d461c",
+          interactionKey,
+          metadata: { role: "head-stem" },
+        },
+        {
+          id: `${node.id}:halo`,
+          primitive: "torus",
+          scale: [0.88, 0.88, 0.88],
+          color: theme.head,
+          emissive: "#5c5320",
+          opacity: 0.72,
+          interactionKey,
+          metadata: { role: "head-route-halo" },
+        },
+        {
+          id: `${node.id}:focus`,
+          primitive: "octahedron",
+          scale: [0.42, 0.58, 0.42],
+          color: theme.head,
+          emissive: "#5c5320",
+          interactionKey,
+          metadata: { role: "head-focus" },
+        },
+      );
       break;
     case "commit-boundary":
     case "git-object":
@@ -318,28 +430,36 @@ function simpleNodeDescriptor(node: GraphNodeRecord, theme: GitVisualTheme): Nod
   return { nodeId: node.id, elements };
 }
 
-function edgeDescriptor(edge: GraphEdgeRecord, theme: GitVisualTheme): EdgeVisualDescriptor {
+function edgeDescriptor(
+  edge: GraphEdgeRecord,
+  theme: GitVisualTheme,
+  topology?: GitTopologyContext,
+): EdgeVisualDescriptor {
+  const activeHistory = edge.properties.headPath === true;
+  let descriptor: EdgeVisualDescriptor;
   switch (edge.kind) {
     case "history":
-      return {
+      descriptor = {
         edgeId: edge.id,
-        style: "git-history",
-        color: theme.edge.history,
-        width: 0.82,
-        opacity: 0.7,
-        head: "arrow",
+        style: activeHistory ? "git-active-history" : "git-history",
+        color: activeHistory ? theme.edge.activeHistory : theme.edge.history,
+        width: activeHistory ? 2.45 : 1.4,
+        opacity: activeHistory ? 0.99 : 0.78,
+        head: activeHistory ? "arrow" : "none",
       };
+      break;
     case "merge-parent":
-      return {
+      descriptor = {
         edgeId: edge.id,
-        style: "git-merge",
-        color: theme.edge.merge,
-        width: 1.2,
-        opacity: 0.88,
+        style: activeHistory ? "git-active-history" : "git-merge",
+        color: activeHistory ? theme.edge.activeHistory : theme.edge.merge,
+        width: activeHistory ? 2.45 : 1.7,
+        opacity: activeHistory ? 0.99 : 0.86,
         head: "arrow",
       };
+      break;
     case "tag-target":
-      return {
+      descriptor = {
         edgeId: edge.id,
         style: "git-tag-pointer",
         color: theme.edge.tag,
@@ -347,8 +467,9 @@ function edgeDescriptor(edge: GraphEdgeRecord, theme: GitVisualTheme): EdgeVisua
         opacity: 0.8,
         head: "diamond",
       };
+      break;
     case "stash-base":
-      return {
+      descriptor = {
         edgeId: edge.id,
         style: "git-stash",
         color: theme.edge.stash,
@@ -356,8 +477,9 @@ function edgeDescriptor(edge: GraphEdgeRecord, theme: GitVisualTheme): EdgeVisua
         opacity: 0.58,
         head: "arrow",
       };
+      break;
     case "remote-tracking":
-      return {
+      descriptor = {
         edgeId: edge.id,
         style: "git-tracking",
         color: theme.edge.tracking,
@@ -366,8 +488,9 @@ function edgeDescriptor(edge: GraphEdgeRecord, theme: GitVisualTheme): EdgeVisua
         animated: true,
         head: "none",
       };
+      break;
     case "remote-membership":
-      return {
+      descriptor = {
         edgeId: edge.id,
         style: "git-remote-membership",
         color: theme.edge.remoteMembership,
@@ -375,9 +498,10 @@ function edgeDescriptor(edge: GraphEdgeRecord, theme: GitVisualTheme): EdgeVisua
         opacity: 0.46,
         head: "arrow",
       };
+      break;
     case "head-symbolic":
     case "head-resolved":
-      return {
+      descriptor = {
         edgeId: edge.id,
         style: "git-head",
         color: theme.edge.head,
@@ -386,9 +510,9 @@ function edgeDescriptor(edge: GraphEdgeRecord, theme: GitVisualTheme): EdgeVisua
         animated: true,
         head: "arrow",
       };
-    case "ref-target":
+      break;
     default:
-      return {
+      descriptor = {
         edgeId: edge.id,
         style: "git-branch-pointer",
         color: theme.edge.branch,
@@ -397,6 +521,43 @@ function edgeDescriptor(edge: GraphEdgeRecord, theme: GitVisualTheme): EdgeVisua
         head: "arrow",
       };
   }
+
+  if (!topology?.focusEdgeIds.has(edge.id)) return descriptor;
+  const ancestry = edge.kind === "history" || edge.kind === "merge-parent";
+  const mergeIngress = topology.mergeIngressEdgeIds.has(edge.id);
+  return {
+    ...descriptor,
+    width: Math.max(descriptor.width, ancestry ? (mergeIngress ? 1.95 : 1.85) : 0.92),
+    opacity: Math.max(descriptor.opacity ?? 1, ancestry ? 0.95 : 0.82),
+  };
+}
+
+function withTopologyFocus(
+  descriptor: NodeVisualDescriptor,
+  node: GraphNodeRecord,
+  theme: GitVisualTheme,
+  topology?: GitTopologyContext,
+): NodeVisualDescriptor {
+  if (!topology) return descriptor;
+  const level = gitTopologyFocusLevel(topology, node.id);
+  if (level !== "selected" && level !== "neighbor") return descriptor;
+  return {
+    ...descriptor,
+    elements: [
+      ...descriptor.elements,
+      {
+        id: `${node.id}:topology-focus`,
+        primitive: "torus",
+        position: [0, 0.12, 0],
+        scale: level === "selected" ? [1.85, 1.85, 1.85] : [1.48, 1.48, 1.48],
+        color: level === "selected" ? theme.focus.selected : theme.focus.neighbor,
+        emissive: level === "selected" ? "#4a4522" : "#17342b",
+        opacity: level === "selected" ? 0.76 : 0.42,
+        interactionKey: node.id,
+        metadata: { role: "topology-focus", level },
+      },
+    ],
+  };
 }
 
 function uniqueOrdered(ids: readonly ElementId[]): readonly ElementId[] {
@@ -581,15 +742,16 @@ export function changedFilePathForGitSelection(
 
 export function createGitVisualMapper(
   theme: GitVisualTheme = DEFAULT_GIT_VISUAL_THEME,
+  topology?: GitTopologyContext,
 ): DataMapper {
   return {
     mapNode(node) {
-      return node.kind === "commit"
-        ? commitDescriptor(node, theme)
-        : simpleNodeDescriptor(node, theme);
+      const descriptor =
+        node.kind === "commit" ? commitDescriptor(node, theme) : simpleNodeDescriptor(node, theme);
+      return withTopologyFocus(descriptor, node, theme, topology);
     },
     mapEdge(edge) {
-      return edgeDescriptor(edge, theme);
+      return edgeDescriptor(edge, theme, topology);
     },
     relatedSelectionIds(selection, dataset) {
       return relatedGitSelectionIds(selection, dataset);

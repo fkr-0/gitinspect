@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { planNodeRendering, type GraphNodeRecord, type SelectionState } from "@gitinspect/graph-elements";
+import {
+  planNodeRendering,
+  type GraphNodeRecord,
+  type SelectionState,
+} from "@gitinspect/graph-elements";
 
 import { createDemoSnapshot } from "../services/repository";
 import { repositorySnapshotToGraphDataset } from "./graphAdapter";
-import { gitVisualMapper, relatedGitSelectionIds } from "./gitVisualMapper";
+import { buildGitTopologyContext } from "./gitTopology";
+import { createGitVisualMapper, gitVisualMapper, relatedGitSelectionIds } from "./gitVisualMapper";
 import { gitEdgeStyleRegistry } from "./gitVisualTheme";
 
 function mappingContext(dataset: ReturnType<typeof repositorySnapshotToGraphDataset>) {
@@ -17,16 +22,37 @@ function mappingContext(dataset: ReturnType<typeof repositorySnapshotToGraphData
 describe("Git visual mapper", () => {
   it("maps commit file classes and keeps file-level interaction identities", () => {
     const dataset = repositorySnapshotToGraphDataset(createDemoSnapshot("/work/example"));
-    const commit = dataset.nodes.find((node) => node.kind === "commit" && Array.isArray(node.properties.files) && node.properties.files.length > 1);
+    const commit = dataset.nodes.find(
+      (node) =>
+        node.kind === "commit" &&
+        Array.isArray(node.properties.files) &&
+        node.properties.files.length > 1,
+    );
     expect(commit).toBeDefined();
 
     const descriptor = gitVisualMapper.mapNode(commit!, mappingContext(dataset));
-    const fileElements = descriptor.elements.filter((element) => element.metadata?.role === "changed-file");
+    const fileElements = descriptor.elements.filter(
+      (element) => element.metadata?.role === "changed-file",
+    );
     expect(fileElements.some((element) => element.primitive === "box")).toBe(true);
     expect(fileElements.some((element) => element.primitive === "sphere")).toBe(true);
-    expect(fileElements.every((element) => element.interactionKey?.startsWith("file:") === true)).toBe(true);
-    expect(descriptor.elements.filter((element) => element.metadata?.role === "branch-indicator").every((element) => element.interactionKey?.startsWith("ref:") === true)).toBe(true);
-    expect(descriptor.elements.some((element) => element.metadata?.role === "signature")).toBe(true);
+    expect(
+      fileElements.every((element) => element.interactionKey?.startsWith("file:") === true),
+    ).toBe(true);
+    expect(
+      descriptor.elements
+        .filter((element) => element.metadata?.role === "branch-indicator")
+        .every((element) => element.interactionKey?.startsWith("ref:") === true),
+    ).toBe(true);
+    expect(descriptor.elements.some((element) => element.metadata?.role === "signature")).toBe(
+      true,
+    );
+    expect(
+      descriptor.elements.some((element) => element.metadata?.role === "history-station-core"),
+    ).toBe(true);
+    expect(descriptor.elements.some((element) => element.metadata?.role === "history-port")).toBe(
+      true,
+    );
   });
 
   it("resolves modifier granularities through Git relation semantics", () => {
@@ -112,8 +138,12 @@ describe("Git visual mapper", () => {
     const localDescriptor = gitVisualMapper.mapNode(local, context);
     const remoteDescriptor = gitVisualMapper.mapNode(remote, context);
     const tagDescriptor = gitVisualMapper.mapNode(tag, context);
-    expect(localDescriptor.elements.some((element) => element.metadata?.role === "branch-stripe")).toBe(true);
-    expect(remoteDescriptor.elements.some((element) => element.metadata?.role === "remote-platform")).toBe(true);
+    expect(
+      localDescriptor.elements.some((element) => element.metadata?.role === "branch-stripe"),
+    ).toBe(true);
+    expect(
+      remoteDescriptor.elements.some((element) => element.metadata?.role === "remote-platform"),
+    ).toBe(true);
     expect(tagDescriptor.elements.some((element) => element.primitive === "octahedron")).toBe(true);
   });
 
@@ -122,14 +152,97 @@ describe("Git visual mapper", () => {
     const context = mappingContext(dataset);
     for (const edge of dataset.edges) {
       const descriptor = gitVisualMapper.mapEdge(edge, context);
-      expect(gitEdgeStyleRegistry.has(descriptor.style), `${edge.kind}: ${descriptor.style}`).toBe(true);
+      expect(gitEdgeStyleRegistry.has(descriptor.style), `${edge.kind}: ${descriptor.style}`).toBe(
+        true,
+      );
     }
     const merge = dataset.edges.find((edge) => edge.kind === "merge-parent");
     const tag = dataset.edges.find((edge) => edge.kind === "tag-target");
+    const active = dataset.edges.find(
+      (edge) =>
+        (edge.kind === "history" || edge.kind === "merge-parent") &&
+        edge.properties.headPath === true,
+    );
     expect(merge).toBeDefined();
     expect(tag).toBeDefined();
     expect(gitVisualMapper.mapEdge(merge!, context).style).toBe("git-merge");
     expect(gitVisualMapper.mapEdge(tag!, context).head).toBe("diamond");
+    expect(active).toBeDefined();
+    expect(gitVisualMapper.mapEdge(active!, context)).toMatchObject({
+      style: "git-active-history",
+      width: 2.45,
+      opacity: 0.99,
+    });
+    const ordinary = dataset.edges.find(
+      (edge) => edge.kind === "history" && edge.properties.headPath !== true,
+    );
+    expect(ordinary).toBeDefined();
+    expect(gitVisualMapper.mapEdge(ordinary!, context).head).toBe("none");
+    expect(gitEdgeStyleRegistry.get("git-active-history")?.pathForm).toBe("polyline");
+  });
+
+  it("turns selection into a structural neighborhood without outranking the HEAD route", () => {
+    const dataset = repositorySnapshotToGraphDataset(createDemoSnapshot("/work/example"));
+    const merge = dataset.nodes.find(
+      (node) => node.kind === "commit" && node.properties.isMerge === true,
+    )!;
+    const topology = buildGitTopologyContext(dataset, merge.id);
+    const mapper = createGitVisualMapper(undefined, topology);
+    const context = mappingContext(dataset);
+    const selectedDescriptor = mapper.mapNode(merge, context);
+    const parent = dataset.nodes.find((node) => topology.immediateParentIds.has(node.id))!;
+    const parentDescriptor = mapper.mapNode(parent, context);
+    const ingress = dataset.edges.find((edge) => topology.mergeIngressEdgeIds.has(edge.id))!;
+    const active = dataset.edges.find(
+      (edge) => edge.properties.headPath === true && ["history", "merge-parent"].includes(edge.kind),
+    )!;
+
+    expect(
+      selectedDescriptor.elements.some(
+        (element) =>
+          element.metadata?.role === "topology-focus" && element.metadata.level === "selected",
+      ),
+    ).toBe(true);
+    expect(
+      parentDescriptor.elements.some(
+        (element) =>
+          element.metadata?.role === "topology-focus" && element.metadata.level === "neighbor",
+      ),
+    ).toBe(true);
+    expect(mapper.mapEdge(ingress, context).width).toBeGreaterThanOrEqual(1.95);
+    expect(mapper.mapEdge(active, context).width).toBeGreaterThan(mapper.mapEdge(ingress, context).width);
+  });
+
+  it("gives merge commits a second-parent ingress socket and refs attached-signal composition", () => {
+    const dataset = repositorySnapshotToGraphDataset(createDemoSnapshot("/work/example"));
+    const context = mappingContext(dataset);
+    const merge = dataset.nodes.find(
+      (node) => node.kind === "commit" && node.properties.isMerge === true,
+    )!;
+    const branch = dataset.nodes.find((node) => node.kind === "local-branch")!;
+    const tag = dataset.nodes.find((node) => node.kind === "tag")!;
+    const head = dataset.nodes.find((node) => node.kind === "head")!;
+
+    expect(
+      gitVisualMapper
+        .mapNode(merge, context)
+        .elements.some((element) => element.metadata?.role === "merge-parent-port"),
+    ).toBe(true);
+    expect(
+      gitVisualMapper
+        .mapNode(branch, context)
+        .elements.some((element) => element.metadata?.role === "ref-stem"),
+    ).toBe(true);
+    expect(
+      gitVisualMapper
+        .mapNode(tag, context)
+        .elements.some((element) => element.metadata?.role === "tag-tab"),
+    ).toBe(true);
+    expect(
+      gitVisualMapper
+        .mapNode(head, context)
+        .elements.some((element) => element.metadata?.role === "head-route-halo"),
+    ).toBe(true);
   });
 
   it("keeps render-planning batch count bounded for one thousand simple commits", () => {

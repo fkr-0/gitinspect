@@ -10,6 +10,7 @@ import {
   type Vec3,
 } from "@gitinspect/graph-elements";
 
+import { gitTopologyPromotionIds } from "../domain/gitTopology";
 import {
   gitScaleTopologyKey,
   layoutGitDatasetForScale,
@@ -77,6 +78,8 @@ export interface GitScaleModel {
   /** Derived viewport projection with preserved semantic IDs plus synthetic aggregate IDs. */
   readonly renderDataset: GraphDataset;
   readonly nodePositions: Readonly<Record<ElementId, Vec3>>;
+  /** Full topology bounds before render LOD; camera fitting never depends on aggregate centroids. */
+  readonly layoutBounds: Readonly<{ readonly min: Vec3; readonly max: Vec3 }>;
   readonly lodPlan: LodRenderPlan;
   readonly aggregateDrillTargets: ReadonlyMap<ElementId, GitAggregateDrillTarget>;
   readonly projectionKey: string;
@@ -97,6 +100,9 @@ interface CollapsedRenderEdge {
   readonly kind: string;
   readonly directed: boolean;
   memberEdgeCount: number;
+  headPath: boolean;
+  firstParent: boolean;
+  secondParent: boolean;
 }
 
 function now(): number {
@@ -104,7 +110,9 @@ function now(): number {
 }
 
 function stringArray(value: unknown): readonly string[] {
-  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
 }
 
 function metadataFingerprint(node: GraphNodeRecord): string {
@@ -125,14 +133,29 @@ function metadataFingerprint(node: GraphNodeRecord): string {
 function metadataFor(node: GraphNodeRecord, fingerprint: string): LodMetadata {
   let importance = Math.max(0, node.weight ?? 0);
   switch (node.kind) {
-    case "head": importance += 20; break;
-    case "local-branch": importance += 9; break;
-    case "tag": importance += 8; break;
-    case "remote-branch": importance += 7; break;
-    case "stash": importance += 6; break;
-    case "remote": importance += 5; break;
-    case "commit-boundary": importance += 3; break;
-    default: break;
+    case "head":
+      importance += 20;
+      break;
+    case "local-branch":
+      importance += 9;
+      break;
+    case "tag":
+      importance += 8;
+      break;
+    case "remote-branch":
+      importance += 7;
+      break;
+    case "stash":
+      importance += 6;
+      break;
+    case "remote":
+      importance += 5;
+      break;
+    case "commit-boundary":
+      importance += 3;
+      break;
+    default:
+      break;
   }
   if (node.properties.isHead === true) importance += 12;
   if (node.properties.isMerge === true) importance += 2;
@@ -143,9 +166,10 @@ function metadataFor(node: GraphNodeRecord, fingerprint: string): LodMetadata {
 
   const localBranch = stringArray(node.properties.localBranches)[0];
   const remoteBranch = stringArray(node.properties.remoteBranches)[0];
-  const semanticBucket = node.kind === "commit"
-    ? `commit:${localBranch ?? remoteBranch ?? node.group ?? "history"}`
-    : `${node.kind}:${node.group ?? "default"}`;
+  const semanticBucket =
+    node.kind === "commit"
+      ? `commit:${localBranch ?? remoteBranch ?? node.group ?? "history"}`
+      : `${node.kind}:${node.group ?? "default"}`;
   return { fingerprint, kind: node.kind, importance, semanticBucket };
 }
 
@@ -258,10 +282,19 @@ function projectDataset(
         kind: edge.kind,
         directed: edge.directed,
         memberEdgeCount: 0,
+        headPath: false,
+        firstParent: false,
+        secondParent: false,
       };
       collapsed.set(key, aggregate);
     }
     aggregate.memberEdgeCount += 1;
+    aggregate.headPath ||= edge.properties.headPath === true;
+    const isFirstParent =
+      edge.properties.firstParent === true || edge.properties.parentIndex === 0;
+    aggregate.firstParent ||= isFirstParent;
+    aggregate.secondParent ||=
+      (edge.kind === "merge-parent" || edge.properties.parentIndex !== undefined) && !isFirstParent;
   }
   const collapsedEdges: GraphEdgeRecord[] = [...collapsed.values()]
     .sort((left, right) => {
@@ -279,11 +312,20 @@ function projectDataset(
         properties: {
           collapsed: true,
           memberEdgeCount: edge.memberEdgeCount,
+          ...(edge.headPath ? { headPath: true } : {}),
+          ...(edge.firstParent && !edge.secondParent
+            ? { firstParent: true, parentIndex: 0 }
+            : {}),
+          ...(edge.secondParent && !edge.firstParent
+            ? { firstParent: false, parentIndex: 1 }
+            : {}),
         },
       };
     });
   renderNodes.sort((left, right) => left.id.localeCompare(right.id));
-  const edges = [...directEdges, ...collapsedEdges].sort((left, right) => left.id.localeCompare(right.id));
+  const edges = [...directEdges, ...collapsedEdges].sort((left, right) =>
+    left.id.localeCompare(right.id),
+  );
   const projectionKey = hashProjection([
     dataset.revision,
     ...lodPlan.full.map((entry) => `f:${entry.id}`),
@@ -319,16 +361,20 @@ export class GitScalePlanner {
     const topologyKeyMs = now() - topologyStarted;
     const layoutCacheHit = topologyKey === this.lastTopologyKey && this.lastLayout !== undefined;
     const layoutStarted = now();
-    const layoutResult = layoutCacheHit
-      ? this.lastLayout!
-      : layoutGitDatasetForScale(input.dataset, {
-          ...(this.options.seed !== undefined ? { seed: this.options.seed } : {}),
-          ...(this.options.directNodeLimit !== undefined ? { directNodeLimit: this.options.directNodeLimit } : {}),
-          ...(this.options.macroGenerationWindow !== undefined
-            ? { macroGenerationWindow: this.options.macroGenerationWindow }
-            : {}),
-          ...(this.lastLayout?.layout ? { previous: this.lastLayout.layout } : {}),
-        });
+    const cachedLayout = this.lastLayout;
+    const layoutResult =
+      layoutCacheHit && cachedLayout
+        ? cachedLayout
+        : layoutGitDatasetForScale(input.dataset, {
+            ...(this.options.seed !== undefined ? { seed: this.options.seed } : {}),
+            ...(this.options.directNodeLimit !== undefined
+              ? { directNodeLimit: this.options.directNodeLimit }
+              : {}),
+            ...(this.options.macroGenerationWindow !== undefined
+              ? { macroGenerationWindow: this.options.macroGenerationWindow }
+              : {}),
+            ...(this.lastLayout?.layout ? { previous: this.lastLayout.layout } : {}),
+          });
     const layoutMs = now() - layoutStarted;
     if (!layoutCacheHit) {
       this.lastTopologyKey = topologyKey;
@@ -360,19 +406,26 @@ export class GitScalePlanner {
         position,
         kind: metadata.kind,
         importance: metadata.importance,
-        semanticBucket: metadata.semanticBucket,
+        semanticBucket:
+          node.kind === "commit" || node.kind === "commit-boundary"
+            ? `${metadata.semanticBucket}:lane:${position[1].toFixed(3)}`
+            : metadata.semanticBucket,
       });
     }
 
     const lodStarted = now();
     const thresholds = input.thresholds ?? this.options.thresholds;
     const bucketSize = input.bucketSize ?? this.options.bucketSize;
+    const topologyPromotionIds = gitTopologyPromotionIds(
+      input.dataset,
+      input.selectedIds ?? new Set<ElementId>(),
+    );
     const lodPlan = planLod({
       nodes: logicalNodes,
       camera: input.camera,
       ...(thresholds ? { thresholds } : {}),
       ...(bucketSize !== undefined ? { bucketSize } : {}),
-      ...(input.selectedIds ? { selectedIds: input.selectedIds } : {}),
+      selectedIds: topologyPromotionIds,
       ...(input.hoveredIds ? { hoveredIds: input.hoveredIds } : {}),
       ...(input.searchHitIds ? { searchHitIds: input.searchHitIds } : {}),
       promotedTier: "full",
@@ -396,6 +449,7 @@ export class GitScalePlanner {
       logicalDataset: input.dataset,
       renderDataset: projection.renderDataset,
       nodePositions: projection.renderPositions,
+      layoutBounds: layoutResult.layout.bounds,
       lodPlan,
       aggregateDrillTargets: projection.aggregateDrillTargets,
       projectionKey: projection.projectionKey,

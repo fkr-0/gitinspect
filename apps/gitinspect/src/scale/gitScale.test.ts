@@ -3,7 +3,7 @@ import type { GraphDataset } from "@gitinspect/graph-elements";
 
 import { GitScalePlanner } from "./gitScale";
 import { layoutGitDatasetForScale } from "./gitScaleLayout";
-import { createSyntheticGitHistory } from "./synthetic";
+import { createSyntheticBranchingGitHistory, createSyntheticGitHistory } from "./synthetic";
 
 function id(index: number): string {
   return `commit:${index.toString(16).padStart(12, "0")}`;
@@ -25,10 +25,19 @@ describe("GitScalePlanner", () => {
       searchHitIds: new Set([searchHit]),
     });
 
-    expect(model.lodPlan.full.map((entry) => entry.id)).toEqual([hovered, searchHit, selected].sort());
+    const fullIds = new Set(model.lodPlan.full.map((entry) => entry.id));
+    expect(fullIds.has(selected)).toBe(true);
+    expect(fullIds.has(hovered)).toBe(true);
+    expect(fullIds.has(searchHit)).toBe(true);
+    expect(fullIds.has("head:HEAD")).toBe(true);
+    expect(fullIds.has("ref:refs/heads/main")).toBe(true);
     expect(model.logicalDataset).toBe(dataset);
-    expect(model.renderDataset.nodes.filter((node) => [selected, hovered, searchHit].includes(node.id)).map((node) => node.id).sort())
-      .toEqual([selected, hovered, searchHit].sort());
+    expect(
+      model.renderDataset.nodes
+        .filter((node) => [selected, hovered, searchHit].includes(node.id))
+        .map((node) => node.id)
+        .sort(),
+    ).toEqual([selected, hovered, searchHit].sort());
     expect(dataset.nodes.find((node) => node.id === selected)?.kind).toBe("commit");
   });
 
@@ -91,11 +100,80 @@ describe("GitScalePlanner", () => {
     expect(model.logicalDataset.nodes).toBe(dataset.nodes);
     expect(model.lodPlan.full.some((entry) => entry.id === id(11))).toBe(true);
   });
+
+  it("preserves Git structural anchors and selected neighborhoods while linear runs aggregate", () => {
+    const base = createSyntheticBranchingGitHistory(4_000);
+    const taggedCommit = id(1_200);
+    const dataset: GraphDataset = {
+      ...base,
+      revision: `${base.revision}:anchors`,
+      nodes: [
+        ...base.nodes,
+        {
+          id: "boundary:truncated-before",
+          kind: "commit-boundary",
+          label: "History truncated before this point",
+          properties: { truncatedBoundary: true },
+        },
+        {
+          id: "ref:refs/tags/scale-anchor",
+          kind: "tag",
+          label: "scale-anchor",
+          properties: { name: "refs/tags/scale-anchor" },
+        },
+      ],
+      edges: [
+        ...base.edges,
+        {
+          id: "tag-target:scale-anchor",
+          source: "ref:refs/tags/scale-anchor",
+          target: taggedCommit,
+          kind: "tag-target",
+          directed: true,
+          properties: {},
+        },
+      ],
+    };
+    const planner = new GitScalePlanner({ directNodeLimit: 512, macroGenerationWindow: 128 });
+    const mergeIndex = Math.floor(4_000 * 0.65);
+    const selected = "commit:feature-scale-1";
+    const model = planner.plan({
+      dataset,
+      camera: { position: [20_000, 20_000, 20_000] },
+      thresholds: { fullDistance: 1, simplifiedDistance: 2, aggregateDistance: 100_000 },
+      selectedIds: new Set([selected]),
+      bucketSize: 160,
+    });
+    const fullIds = new Set(model.lodPlan.full.map((entry) => entry.id));
+    const selectedContext = [
+      selected,
+      "commit:feature-scale-0",
+      `commit:${Math.floor(4_000 * 0.35).toString(16).padStart(12, "0")}`,
+      id(mergeIndex),
+      "ref:refs/heads/feature-scale",
+      "head:HEAD",
+      "ref:refs/heads/main",
+      "ref:refs/remotes/origin/main",
+      "boundary:truncated-before",
+      "ref:refs/tags/scale-anchor",
+      taggedCommit,
+    ];
+    for (const anchor of selectedContext) expect(fullIds.has(anchor), anchor).toBe(true);
+    expect(fullIds.has(id(1_201))).toBe(false);
+    expect(model.lodPlan.aggregates.length).toBeGreaterThan(0);
+    expect(model.stats.renderNodeCount).toBeLessThan(model.stats.logicalNodeCount / 2);
+    const collapsedHeadPath = model.renderDataset.edges.find(
+      (edge) => edge.properties.collapsed === true && edge.properties.headPath === true,
+    );
+    expect(collapsedHeadPath).toBeDefined();
+  });
 });
 
 describe("layoutGitDatasetForScale", () => {
   it("keeps direct Git layout for smaller worlds and compacts the layout graph for large histories", () => {
-    const small = layoutGitDatasetForScale(createSyntheticGitHistory(1_000), { directNodeLimit: 2_048 });
+    const small = layoutGitDatasetForScale(createSyntheticGitHistory(1_000), {
+      directNodeLimit: 2_048,
+    });
     const largeDataset = createSyntheticGitHistory(10_000);
     const large = layoutGitDatasetForScale(largeDataset, {
       directNodeLimit: 2_048,
@@ -109,7 +187,38 @@ describe("layoutGitDatasetForScale", () => {
     for (let index = 1; index < 10_000; index += 499) {
       const parent = large.layout.nodePositions[id(index - 1)]!;
       const child = large.layout.nodePositions[id(index)]!;
-      expect(child[1]).toBeGreaterThan(parent[1]);
+      expect(child[0]).toBeGreaterThan(parent[0]);
+      expect(child[1]).toBe(parent[1]);
+      expect(parent[2]).toBe(0);
+      expect(child[2]).toBe(0);
     }
+  });
+
+  it("keeps branch lanes and merge convergence explicit in macro mode without identity scatter", () => {
+    const dataset = createSyntheticBranchingGitHistory(4_000);
+    const first = layoutGitDatasetForScale(dataset, {
+      directNodeLimit: 512,
+      macroGenerationWindow: 128,
+    });
+    const second = layoutGitDatasetForScale(dataset, {
+      directNodeLimit: 512,
+      macroGenerationWindow: 128,
+    });
+    const featureTip = first.layout.nodePositions["commit:feature-scale-1"]!;
+    const mergeIndex = Math.floor(4_000 * 0.65);
+    const merge = first.layout.nodePositions[id(mergeIndex)]!;
+    const mainBeforeMerge = first.layout.nodePositions[id(mergeIndex - 1)]!;
+    const featureRef = first.layout.nodePositions["ref:refs/heads/feature-scale"]!;
+
+    expect(first.mode).toBe("macro");
+    expect(second.layout.nodePositions).toEqual(first.layout.nodePositions);
+    expect(featureTip[1]).not.toBe(mainBeforeMerge[1]);
+    expect(featureTip[2]).toBe(0);
+    expect(merge[1]).toBe(mainBeforeMerge[1]);
+    expect(merge[2]).toBe(0);
+    expect(merge[0]).toBeGreaterThan(featureTip[0]);
+    expect(featureRef[0]).toBe(featureTip[0]);
+    expect(featureRef[1]).toBeGreaterThan(featureTip[1]);
+    expect(featureRef[2]).toBeGreaterThan(featureTip[2]);
   });
 });

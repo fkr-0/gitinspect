@@ -4,11 +4,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gitinspect_core::{
-    ChangeReason, CommitDiff, CompactGitRepositorySnapshot, DiffOptions, GitRepositorySnapshot,
-    OpenOptions, RepositoryHandle, RepositoryService, WatchOptions,
+    ChangeReason, CommitDiff, CommitFileDetail, CompactGitCommitBatch,
+    CompactGitRepositorySnapshot, DiffOptions, FileDetailOptions, GitRefRecord, GitRemoteRecord,
+    GitRepositorySnapshot, OpenOptions, RepositoryAppendAwareRefresh, RepositoryHandle,
+    RepositoryRefreshCursor, RepositoryService, WatchOptions,
 };
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,6 +18,57 @@ pub struct RepositoryPathSelection {
     pub mode: RepositoryPathSelectionMode,
     #[allow(dead_code)]
     pub expected_kind: Option<String>,
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn refresh_repository_compact_delta(
+    repository_id: String,
+    expected_revision: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<CompactRepositoryDeltaRefresh, String> {
+    state
+        .authority
+        .refresh_compact_delta(&repository_id, expected_revision.as_deref())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactRepositoryAppendDelta {
+    pub base_revision: String,
+    pub base_head: String,
+    pub revision: String,
+    pub head: String,
+    pub head_ref: String,
+    pub commits: CompactGitCommitBatch,
+    pub refs: Vec<GitRefRecord>,
+    pub remotes: Vec<GitRemoteRecord>,
+    pub hooks: Vec<String>,
+    pub drop_commit_count: usize,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "status", rename_all = "kebab-case")]
+pub enum CompactRepositoryDeltaRefresh {
+    Unchanged {
+        revision: String,
+    },
+    Delta {
+        delta: Box<CompactRepositoryAppendDelta>,
+    },
+    Full {
+        session: Box<CompactRepositorySession>,
+    },
+}
+
+fn bounded_file_detail_options(options: Option<FileDetailOptions>) -> FileDetailOptions {
+    let defaults = FileDetailOptions::default();
+    let requested = options.unwrap_or_else(|| defaults.clone());
+    FileDetailOptions {
+        max_blob_bytes: requested.max_blob_bytes.min(defaults.max_blob_bytes),
+        max_patch_lines: requested.max_patch_lines.min(defaults.max_patch_lines),
+        context_lines: requested.context_lines.min(defaults.context_lines),
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -68,6 +121,7 @@ pub struct WatchSession {
 struct RepositoryEntry {
     handle: RepositoryHandle,
     revision: String,
+    cursor: RepositoryRefreshCursor,
 }
 
 fn bounded_diff_options(options: Option<DiffOptions>) -> DiffOptions {
@@ -98,8 +152,10 @@ impl RepositoryAuthority {
     }
 
     pub fn open(&self, path: &str) -> Result<RepositorySession, String> {
-        let (handle, snapshot) = RepositoryService::open(path, OpenOptions::default())
-            .map_err(|error| error.to_string())?;
+        let options = OpenOptions::default();
+        let (handle, snapshot) =
+            RepositoryService::open(path, options.clone()).map_err(|error| error.to_string())?;
+        let cursor = RepositoryRefreshCursor::from_snapshot(&snapshot, &options);
         let id = self.next_repository_id.fetch_add(1, Ordering::Relaxed) + 1;
         let key = format!("repository:{id}");
         self.lock_repositories()?.insert(
@@ -107,6 +163,7 @@ impl RepositoryAuthority {
             RepositoryEntry {
                 handle,
                 revision: snapshot.revision.clone(),
+                cursor,
             },
         );
         Ok(RepositorySession { key, snapshot })
@@ -120,6 +177,89 @@ impl RepositoryAuthority {
             key: session.key,
             snapshot: compact,
         })
+    }
+
+    pub fn refresh_compact_delta(
+        &self,
+        repository_id: &str,
+        expected_revision: Option<&str>,
+    ) -> Result<CompactRepositoryDeltaRefresh, String> {
+        let entry = self
+            .lock_repositories()?
+            .get(repository_id)
+            .cloned()
+            .ok_or_else(|| format!("unknown repository handle: {repository_id}"))?;
+        let observed_revision = entry.revision.clone();
+        if let Some(expected) = expected_revision
+            && expected != observed_revision
+        {
+            return Err(format!(
+                "stale repository revision: expected {expected}, current {observed_revision}"
+            ));
+        }
+
+        let options = OpenOptions::default();
+        let refresh = entry
+            .handle
+            .refresh_append_aware(&entry.cursor, options.clone())
+            .map_err(|error| error.to_string())?;
+
+        let mut repositories = self.lock_repositories()?;
+        let current = repositories
+            .get_mut(repository_id)
+            .ok_or_else(|| format!("unknown repository handle: {repository_id}"))?;
+        if current.revision != observed_revision {
+            return Err(format!(
+                "stale repository refresh: observed {observed_revision}, current {}",
+                current.revision
+            ));
+        }
+
+        match refresh {
+            RepositoryAppendAwareRefresh::Unchanged { revision } => {
+                if revision != observed_revision {
+                    return Err(format!(
+                        "unchanged repository revision mismatch: observed {observed_revision}, got {revision}"
+                    ));
+                }
+                Ok(CompactRepositoryDeltaRefresh::Unchanged { revision })
+            }
+            RepositoryAppendAwareRefresh::Append { delta } => {
+                let commits = CompactGitCommitBatch::from_commits(&delta.commits)
+                    .map_err(|error| error.to_string())?;
+                let next_cursor = entry.cursor.next_after(&delta);
+                current.revision = delta.revision.clone();
+                current.cursor = next_cursor;
+                Ok(CompactRepositoryDeltaRefresh::Delta {
+                    delta: Box::new(CompactRepositoryAppendDelta {
+                        base_revision: delta.base_revision,
+                        base_head: delta.base_head,
+                        revision: delta.revision,
+                        head: delta.head,
+                        head_ref: delta.head_ref,
+                        commits,
+                        refs: delta.refs,
+                        remotes: delta.remotes,
+                        hooks: delta.hooks,
+                        drop_commit_count: delta.drop_commit_count,
+                        truncated: delta.truncated,
+                    }),
+                })
+            }
+            RepositoryAppendAwareRefresh::Full { snapshot } => {
+                let cursor = RepositoryRefreshCursor::from_snapshot(&snapshot, &options);
+                let compact = CompactGitRepositorySnapshot::from_snapshot(&snapshot)
+                    .map_err(|error| error.to_string())?;
+                current.revision = snapshot.revision;
+                current.cursor = cursor;
+                Ok(CompactRepositoryDeltaRefresh::Full {
+                    session: Box::new(CompactRepositorySession {
+                        key: repository_id.to_owned(),
+                        snapshot: compact,
+                    }),
+                })
+            }
+        }
     }
 
     pub fn refresh(
@@ -140,10 +280,12 @@ impl RepositoryAuthority {
                 "stale repository revision: expected {expected}, current {observed_revision}"
             ));
         }
+        let options = OpenOptions::default();
         let snapshot = entry
             .handle
-            .refresh(OpenOptions::default())
+            .refresh(options.clone())
             .map_err(|error| error.to_string())?;
+        let cursor = RepositoryRefreshCursor::from_snapshot(&snapshot, &options);
         let mut repositories = self.lock_repositories()?;
         let current = repositories
             .get_mut(repository_id)
@@ -155,6 +297,7 @@ impl RepositoryAuthority {
             ));
         }
         current.revision = snapshot.revision.clone();
+        current.cursor = cursor;
         Ok(RepositorySession {
             key: repository_id.to_owned(),
             snapshot,
@@ -201,9 +344,11 @@ impl RepositoryAuthority {
                 revision: observed_revision,
             });
         };
+        let cursor = RepositoryRefreshCursor::from_snapshot(&snapshot, &OpenOptions::default());
         let compact = CompactGitRepositorySnapshot::from_snapshot(&snapshot)
             .map_err(|error| error.to_string())?;
         current.revision = snapshot.revision;
+        current.cursor = cursor;
         Ok(CompactRepositoryRefresh::Changed {
             session: Box::new(CompactRepositorySession {
                 key: repository_id.to_owned(),
@@ -221,6 +366,19 @@ impl RepositoryAuthority {
         let handle = self.handle(repository_id)?;
         handle
             .commit_diff(oid, bounded_diff_options(options))
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn commit_file_detail(
+        &self,
+        repository_id: &str,
+        oid: &str,
+        path: &str,
+        options: Option<FileDetailOptions>,
+    ) -> Result<CommitFileDetail, String> {
+        let handle = self.handle(repository_id)?;
+        handle
+            .commit_file_detail(oid, path, bounded_file_detail_options(options))
             .map_err(|error| error.to_string())
     }
 
@@ -305,10 +463,22 @@ pub fn get_commit_diff(
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn start_repository_watch(
+pub fn get_commit_file_detail(
     repository_id: String,
+    oid: String,
+    path: String,
+    options: Option<FileDetailOptions>,
     state: State<'_, AppState>,
-    app: AppHandle,
+) -> Result<CommitFileDetail, String> {
+    state
+        .authority
+        .commit_file_detail(&repository_id, &oid, &path, options)
+}
+
+fn start_repository_watch_for_app<R: Runtime>(
+    repository_id: String,
+    state: &AppState,
+    app: AppHandle<R>,
 ) -> Result<WatchSession, String> {
     let handle = state.authority.handle(&repository_id)?;
     let watcher = handle
@@ -357,6 +527,15 @@ pub fn start_repository_watch(
     });
 
     Ok(WatchSession { watch_id })
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn start_repository_watch(
+    repository_id: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<WatchSession, String> {
+    start_repository_watch_for_app(repository_id, state.inner(), app)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -466,6 +645,22 @@ mod tests {
         assert_eq!(tightened.max_blob_bytes, 64);
         assert_eq!(tightened.binary_probe_bytes, 16);
         assert_eq!(tightened.max_files, 7);
+
+        let detail_defaults = FileDetailOptions::default();
+        let detail_bounded = bounded_file_detail_options(Some(FileDetailOptions {
+            max_blob_bytes: u64::MAX,
+            max_patch_lines: usize::MAX,
+            context_lines: usize::MAX,
+        }));
+        assert_eq!(detail_bounded, detail_defaults);
+        let detail_tightened = bounded_file_detail_options(Some(FileDetailOptions {
+            max_blob_bytes: 1024,
+            max_patch_lines: 50,
+            context_lines: 1,
+        }));
+        assert_eq!(detail_tightened.max_blob_bytes, 1024);
+        assert_eq!(detail_tightened.max_patch_lines, 50);
+        assert_eq!(detail_tightened.context_lines, 1);
     }
 
     #[test]
@@ -501,6 +696,13 @@ mod tests {
         assert_eq!(diff.oid, second_oid);
         assert_eq!(diff.files.len(), 1);
         assert_eq!(diff.files[0].path, "one.txt");
+
+        let detail = authority
+            .commit_file_detail(&opened.key, &second_oid, "one.txt", None)
+            .unwrap();
+        assert_eq!(detail.oid, second_oid);
+        assert_eq!(detail.path, "one.txt");
+        assert!(!detail.hunks.is_empty());
     }
 
     #[test]
@@ -553,6 +755,130 @@ mod tests {
             CompactRepositoryRefresh::Unchanged { .. } => {
                 panic!("changed repository failed to return a new snapshot")
             }
+        }
+    }
+
+    #[test]
+    fn native_watcher_provenance_emits_event_before_append_aware_authority_refresh() {
+        use tauri::Listener;
+
+        let fixture = Fixture::new();
+        let first_oid = fixture.commit("one.txt", "one\n", "one");
+        let app = tauri::test::mock_builder()
+            .manage(AppState::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let state = app.state::<AppState>();
+        let opened = state
+            .authority
+            .open_compact(fixture.path.to_str().unwrap())
+            .unwrap();
+        let base_revision = opened.snapshot.revision.clone();
+        let (event_sender, event_receiver) = std::sync::mpsc::channel();
+        let listener = app.listen("repository://changed", move |event| {
+            let _ = event_sender.send(event.payload().to_owned());
+        });
+        let watch =
+            start_repository_watch_for_app(opened.key.clone(), state.inner(), app.handle().clone())
+                .expect("native Tauri repository watch starts");
+
+        let second_oid = fixture.commit("one.txt", "one\ntwo\n", "two");
+        let third_oid = fixture.commit("one.txt", "one\ntwo\nthree\n", "three");
+        let event_payload = event_receiver
+            .recv_timeout(Duration::from_secs(3))
+            .expect("Tauri repository://changed event arrives from the native watcher");
+
+        assert!(event_payload.contains("\"repositoryId\""));
+        assert!(event_payload.contains("\"previousRevision\""));
+        assert!(event_payload.contains("\"reasons\""));
+        assert!(
+            event_payload.contains(&opened.key),
+            "event payload: {event_payload}"
+        );
+        assert!(
+            event_payload.contains(&base_revision),
+            "event must expose the authority revision that preceded refresh: {event_payload}"
+        );
+        // Event emission does not mutate the repository authority. The existing
+        // compact/delta IPC boundary remains the sole refresh authority.
+        assert_eq!(
+            state.authority.revision(&opened.key).unwrap(),
+            base_revision
+        );
+
+        match state
+            .authority
+            .refresh_compact_delta(&opened.key, Some(&base_revision))
+            .unwrap()
+        {
+            CompactRepositoryDeltaRefresh::Delta { delta } => {
+                let commits = delta.commits.expand().unwrap();
+                assert_eq!(delta.base_revision, base_revision);
+                assert_eq!(delta.base_head, first_oid);
+                assert_eq!(delta.head, third_oid);
+                assert_eq!(commits.len(), 2);
+                assert_eq!(commits[0].oid, third_oid);
+                assert_eq!(commits[1].oid, second_oid);
+                assert_eq!(
+                    state.authority.revision(&opened.key).unwrap(),
+                    delta.revision
+                );
+            }
+            other => panic!("rapid linear appends should remain a bounded delta, got {other:?}"),
+        }
+
+        if let Some(stop) = state.watches.lock().unwrap().remove(&watch.watch_id) {
+            stop.store(true, Ordering::Release);
+        }
+        app.unlisten(listener);
+    }
+
+    #[test]
+    fn delta_authority_returns_linear_append_and_full_ref_fallback() {
+        let fixture = Fixture::new();
+        let first_oid = fixture.commit("one.txt", "one\n", "one");
+        let authority = RepositoryAuthority::default();
+        let opened = authority
+            .open_compact(fixture.path.to_str().unwrap())
+            .unwrap();
+        let base_revision = opened.snapshot.revision.clone();
+
+        let second_oid = fixture.commit("one.txt", "one\ntwo\n", "two");
+        let delta_revision = match authority
+            .refresh_compact_delta(&opened.key, Some(&base_revision))
+            .unwrap()
+        {
+            CompactRepositoryDeltaRefresh::Delta { delta } => {
+                assert_eq!(delta.base_revision, base_revision);
+                assert_eq!(delta.base_head, first_oid);
+                assert_eq!(delta.head, second_oid);
+                assert_eq!(delta.commits.expand().unwrap().len(), 1);
+                delta.revision
+            }
+            other => panic!("expected append delta, got {other:?}"),
+        };
+        assert!(
+            authority
+                .refresh_compact_delta(&opened.key, Some(&base_revision))
+                .unwrap_err()
+                .contains("stale repository revision")
+        );
+
+        run(&fixture.path, ["branch", "side", "HEAD~1"]);
+        match authority
+            .refresh_compact_delta(&opened.key, Some(&delta_revision))
+            .unwrap()
+        {
+            CompactRepositoryDeltaRefresh::Full { session } => {
+                let snapshot = session.snapshot.expand().unwrap();
+                assert!(
+                    snapshot
+                        .refs
+                        .iter()
+                        .any(|reference| reference.name == "refs/heads/side")
+                );
+            }
+            other => panic!("ref-set change should use full fallback, got {other:?}"),
         }
     }
 }
