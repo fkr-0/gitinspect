@@ -189,6 +189,9 @@ struct SmokeReport {
     frame_accessibility_roving: bool,
     frame_accessibility_element_id: String,
     frame_accessibility_blocker: String,
+    frame_accessibility_visibility_state: String,
+    frame_accessibility_document_has_focus: bool,
+    frame_accessibility_focus_stable: bool,
     frame_accessibility_diagnostics: String,
 }
 
@@ -387,6 +390,17 @@ fn mutation_preview_native_smoke_complete(
             report.frame_accessibility_pressed,
             report.frame_accessibility_roving,
             report.frame_accessibility_element_id
+        ));
+    }
+    if report.frame_accessibility_visibility_state != "visible"
+        || !report.frame_accessibility_document_has_focus
+        || !report.frame_accessibility_focus_stable
+    {
+        failures.push(format!(
+            "transformed-topology accessibility visibility/focus was not stable: visibility={}, focus={}, diagnostic_focus_stable={}",
+            report.frame_accessibility_visibility_state,
+            report.frame_accessibility_document_has_focus,
+            report.frame_accessibility_focus_stable
         ));
     }
 
@@ -708,6 +722,9 @@ fn format_report(report: &SmokeReport, failures: &[String]) -> String {
             "frame_accessibility_roving={}\n",
             "frame_accessibility_element_id={}\n",
             "frame_accessibility_blocker={}\n",
+            "frame_accessibility_visibility_state={}\n",
+            "frame_accessibility_document_has_focus={}\n",
+            "frame_accessibility_focus_stable={}\n",
             "frame_accessibility_diagnostics={}\n",
             "failures={}\n"
         ),
@@ -756,6 +773,9 @@ fn format_report(report: &SmokeReport, failures: &[String]) -> String {
         report.frame_accessibility_roving,
         clean(&report.frame_accessibility_element_id),
         clean(&report.frame_accessibility_blocker),
+        clean(&report.frame_accessibility_visibility_state),
+        report.frame_accessibility_document_has_focus,
+        report.frame_accessibility_focus_stable,
         clean(&report.frame_accessibility_diagnostics),
         failures
             .iter()
