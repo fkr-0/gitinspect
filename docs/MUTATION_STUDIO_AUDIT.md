@@ -1,6 +1,6 @@
 # Mutation Studio Audit
 
-Status: **Phase 37 COMPLETE/GREEN** for the requested preview-only mutation vocabulary, authoritative transformed-topology contract, release tests, accessibility semantics, CPU scale gates, and startup bundle gate. Headed GPU **frame-budget timing remains explicitly unqualified by the current Tauri/WebKit environment**; the exact blocker is recorded below and no FPS/frame-budget success is claimed.
+Status: **Phase 37 COMPLETE/GREEN** for the requested preview-only mutation vocabulary, authoritative transformed-topology contract, release tests, accessibility semantics, CPU scale gates, startup bundle gate, and genuine headed GPU/frame-timing evidence. A strict FPS/frame-budget pass remains explicitly **unqualified** because the final headed run contained an 8.292 s scheduling/visibility outlier; CPU planner timing is not substituted for GPU evidence.
 
 Authority boundary: Gitinspect mutation execution remains **disposable-copy preview only**. The application exposes no original-repository apply command. The Phase-28 through Phase-31 original-apply safety case remains **NO-GO** and is not reopened or weakened by Phase 37.
 
@@ -131,24 +131,32 @@ Production build:
 - initial application JS: **357.86 kB minified / 106.57 kB gzip**, safely below the <1 MB startup gate;
 - deferred `GraphScene`: **1,034.30 kB minified / 280.95 kB gzip**.
 
-### Headed GPU/frame-timing attempt
+### Headed GPU/frame-timing evidence
 
-A real Tauri/WebKit window was run on `DISPLAY=:0`. Host GL qualification reports direct rendering enabled and accelerated Mesa Intel Iris Xe graphics. The WebKit WebGL context itself is available (its privacy-normalized renderer string in the smoke is `Apple GPU`).
+A real Tauri/WebKit window was run on `DISPLAY=:0`. Host GL qualification reports direct rendering enabled and accelerated Mesa Intel Iris Xe graphics. The WebKit WebGL context is available; its privacy-normalized renderer string in the smoke is `Apple GPU`.
 
-The corrected native smoke now:
+The corrected native smoke:
 
 - selects the actual nested R3F canvas (`.viewport__canvas canvas`);
 - validates that known software renderer strings such as llvmpipe/softpipe/SwiftShader are rejected;
 - uses `Builder::build` + `App::run_return` and captures `ExitRequested` codes so a FAIL report cannot return shell success;
-- bounds frame sampling and emits an explicit blocker rather than hanging or substituting CPU timers.
+- bounds frame sampling and never substitutes CPU timers for headed frame cadence.
 
-On the final headed qualification, `requestAnimationFrame` delivered the 30-frame warmup, then stalled after **30/90 baseline samples**. The durable smoke field is:
+The final controlled visible-window qualification is durable at `.ws-bridge/evidence/gitinspect-phase37-final-headed.txt`, SHA256 `6383b49424c87678ba5e08266940f5022413196f7c54b529e16e1b240c313fa8`. It records:
 
-`frame_timing_blocker=Headed requestAnimationFrame cadence stalled after 30/90 samples`
+- logical fixture: **1,000 commits**;
+- authoritative preview delta: **32 commits**;
+- **120** headed transition frame samples;
+- baseline median / p95: **16 / 17 ms**;
+- transition median / p95: **16 / 17 ms**;
+- transition maximum: **8292 ms**;
+- samples above 16.7 ms: **14**;
+- topology commit latency: **26 ms**;
+- `frame_timing_blocker=` empty.
 
-Therefore Phase 37 **does not claim a transition median, p95, max frame time, FPS, or frame-budget pass**. CPU planner timings are not substituted for this missing headed cadence evidence.
+This is genuine headed GPU/frame-timing evidence. Phase 37 nevertheless **does not claim a strict FPS or frame-budget pass**: the 8.292 s maximum is a real scheduling/visibility outlier even though median and p95 cadence are near 60 Hz. The post-audit evidence note at `.ws-bridge/evidence/gitinspect-phase37-post-audit.md` preserves this qualification boundary. CPU planner timings remain separate and are not relabeled as FPS.
 
-The same native smoke still passes the real React tray -> production Tauri commands -> disposable Rust backend lifecycle for rebase-reorder, squash, fixup, reword, drop, split, cherry-pick conflict, stale-revision rejection, in-flight cancellation, preview-only confirmation, disabled apply, and zero sandbox leakage.
+The same native smoke passes the real React tray -> production Tauri commands -> disposable Rust backend lifecycle for rebase-reorder, squash, fixup, reword, drop, split, cherry-pick conflict, stale-revision rejection, in-flight cancellation, preview-only confirmation, disabled apply, and zero sandbox leakage. Headed projected-node pressed/roving accessibility remains explicitly unclaimed: the exact blocker is `Timed out waiting for projected authoritative transformed node`, and AT-SPI is unavailable in the automated desktop session; DOM/unit/integration accessibility semantics remain the Phase-37 accessibility authority.
 
 ## Original-apply safety boundary
 
