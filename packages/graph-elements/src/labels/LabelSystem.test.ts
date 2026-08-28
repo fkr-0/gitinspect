@@ -3,10 +3,25 @@ import { describe, expect, it } from "vitest";
 import { LabelSystem, type LabelDescriptor } from "./LabelSystem";
 
 const labels: readonly LabelDescriptor[] = [
-  { id: "near-important", text: "near", elementId: "a", position: [0, 0, 2], importance: 10, maxLod: 2 },
+  {
+    id: "near-important",
+    text: "near",
+    elementId: "a",
+    position: [0, 0, 2],
+    importance: 10,
+    maxLod: 2,
+  },
   { id: "far", text: "far", elementId: "b", position: [0, 0, 100], importance: 9, maxDistance: 20 },
   { id: "low", text: "low", elementId: "c", position: [0, 0, 3], importance: 1 },
-  { id: "selected-far", text: "selected", elementId: "d", position: [0, 0, 200], importance: 0, maxDistance: 10, maxLod: 0 },
+  {
+    id: "selected-far",
+    text: "selected",
+    elementId: "d",
+    position: [0, 0, 200],
+    importance: 0,
+    maxDistance: 10,
+    maxLod: 0,
+  },
 ];
 
 describe("LabelSystem", () => {
@@ -18,11 +33,20 @@ describe("LabelSystem", () => {
       selectedIds: new Set(["d"]),
     });
 
-    expect(plan.visible.map((entry) => entry.descriptor.id)).toEqual(["selected-far", "near-important"]);
+    expect(plan.visible.map((entry) => entry.descriptor.id)).toEqual([
+      "selected-far",
+      "near-important",
+    ]);
     expect(plan.hidden).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ descriptor: expect.objectContaining({ id: "far" }), hiddenReason: "distance" }),
-        expect.objectContaining({ descriptor: expect.objectContaining({ id: "low" }), hiddenReason: "importance" }),
+        expect.objectContaining({
+          descriptor: expect.objectContaining({ id: "far" }),
+          hiddenReason: "distance",
+        }),
+        expect.objectContaining({
+          descriptor: expect.objectContaining({ id: "low" }),
+          hiddenReason: "importance",
+        }),
       ]),
     );
   });
@@ -40,7 +64,10 @@ describe("LabelSystem", () => {
 
     expect(plan.visible.map((entry) => entry.descriptor.id)).toEqual(["a", "b"]);
     expect(plan.hidden).toEqual([
-      expect.objectContaining({ descriptor: expect.objectContaining({ id: "c" }), hiddenReason: "budget" }),
+      expect.objectContaining({
+        descriptor: expect.objectContaining({ id: "c" }),
+        hiddenReason: "budget",
+      }),
     ]);
   });
 
@@ -56,8 +83,20 @@ describe("LabelSystem", () => {
     });
     const plan = system.evaluate(
       [
-        { id: "high", text: "high", position: [0, 0, 1], importance: 10, collisionGroup: "screen-cell-1" },
-        { id: "low", text: "low", position: [0, 0, 2], importance: 1, collisionGroup: "screen-cell-1" },
+        {
+          id: "high",
+          text: "high",
+          position: [0, 0, 1],
+          importance: 10,
+          collisionGroup: "screen-cell-1",
+        },
+        {
+          id: "low",
+          text: "low",
+          position: [0, 0, 2],
+          importance: 1,
+          collisionGroup: "screen-cell-1",
+        },
       ],
       { cameraPosition: [0, 0, 0], lod: 0 },
     );

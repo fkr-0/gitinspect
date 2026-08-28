@@ -50,7 +50,9 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function normalizeDefinition(definition: EdgeStyleDefinition | undefined): Required<EdgeStyleDefinition> {
+function normalizeDefinition(
+  definition: EdgeStyleDefinition | undefined,
+): Required<EdgeStyleDefinition> {
   return { ...BASE_STYLE, ...definition };
 }
 
@@ -86,11 +88,8 @@ export class EdgeStyleRegistry {
       ? descriptor.style
       : this.#fallbackStyleId;
     const definition = normalizeDefinition(this.#styles.get(registryStyleId));
-    const pattern = descriptor.dashed === undefined
-      ? definition.pattern
-      : descriptor.dashed
-        ? "dashed"
-        : "solid";
+    const pattern =
+      descriptor.dashed === undefined ? definition.pattern : descriptor.dashed ? "dashed" : "solid";
     const animated = descriptor.animated ?? definition.animated;
     const head = descriptor.head ?? definition.head;
 

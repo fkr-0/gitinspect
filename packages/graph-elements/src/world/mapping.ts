@@ -37,7 +37,10 @@ export interface DataMapper<
     selection: SelectionState,
     dataset: GraphDatasetView<TNode, TEdge>,
   ): readonly ElementId[];
-  childWorld?(node: TNode, context: MappingContext<TNode, TEdge>): Promise<GraphDataset | undefined>;
+  childWorld?(
+    node: TNode,
+    context: MappingContext<TNode, TEdge>,
+  ): Promise<GraphDataset | undefined>;
 }
 
 const ORIGIN: Vec3 = [0, 0, 0];

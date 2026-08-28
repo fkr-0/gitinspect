@@ -40,7 +40,9 @@ describe("EdgeStyleRegistry", () => {
       head: "diamond",
     });
 
-    expect(registry.resolve({ ...descriptor, dashed: false, animated: false, head: "arrow" })).toMatchObject({
+    expect(
+      registry.resolve({ ...descriptor, dashed: false, animated: false, head: "arrow" }),
+    ).toMatchObject({
       pattern: "solid",
       animated: false,
       head: "arrow",

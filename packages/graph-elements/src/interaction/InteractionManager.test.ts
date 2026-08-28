@@ -31,8 +31,12 @@ describe("PickRegistry", () => {
       },
     );
 
-    expect(registry.resolve({ objectId: "mesh", instanceId: 7 })).toMatchObject({ elementId: "file-7" });
-    expect(registry.resolve({ objectId: "mesh", instanceId: 8 })).toMatchObject({ elementId: "node-a" });
+    expect(registry.resolve({ objectId: "mesh", instanceId: 7 })).toMatchObject({
+      elementId: "file-7",
+    });
+    expect(registry.resolve({ objectId: "mesh", instanceId: 8 })).toMatchObject({
+      elementId: "node-a",
+    });
   });
 });
 
@@ -93,7 +97,8 @@ describe("InteractionManager", () => {
       { elementId: "e1", interactionKey: "edge", availableGranularities: ["edge-group"] },
     );
     const manager = new InteractionManager(registry, {
-      resolveRelatedIds: (_record, granularity) => (granularity === "edge-group" ? ["e1", "e2"] : []),
+      resolveRelatedIds: (_record, granularity) =>
+        granularity === "edge-group" ? ["e1", "e2"] : [],
     });
 
     expect(manager.click({ objectId: "edge" })).toEqual({

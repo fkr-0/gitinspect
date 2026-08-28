@@ -1,9 +1,4 @@
-import type {
-  ElementId,
-  GraphDataset,
-  GraphEdgeRecord,
-  Vec3,
-} from "@gitinspect/contracts";
+import type { ElementId, GraphDataset, GraphEdgeRecord, Vec3 } from "@gitinspect/contracts";
 
 export interface LayoutWeights {
   readonly temporalHints: number;
@@ -169,7 +164,9 @@ function buildAdjacency(dataset: GraphDataset): {
     validEdges.push(edge);
     if (edge.directed) outgoingMutable.get(edge.source)?.push(edge);
   }
-  const normalize = (entries: Map<ElementId, GraphEdgeRecord[]>): ReadonlyMap<ElementId, readonly GraphEdgeRecord[]> => {
+  const normalize = (
+    entries: Map<ElementId, GraphEdgeRecord[]>,
+  ): ReadonlyMap<ElementId, readonly GraphEdgeRecord[]> => {
     for (const edges of entries.values()) edges.sort((a, b) => a.id.localeCompare(b.id));
     return entries;
   };
@@ -371,7 +368,8 @@ export class LayoutEngine {
         .sort((a, b) => a.localeCompare(b));
       diagnostics.push({
         kind: "cycle",
-        message: "A dependency cycle was condensed into one layout layer; strict Y ordering is impossible inside the cycle.",
+        message:
+          "A dependency cycle was condensed into one layout layer; strict Y ordering is impossible inside the cycle.",
         nodeIds: component.nodes,
         edgeIds,
       });
@@ -436,9 +434,11 @@ export class LayoutEngine {
       }
       const [x, z] = weightedLane(targets, ownLane);
       const temporalHint = input.constraints?.temporalHints?.[node.id];
-      const temporalNormalized = temporalHint === undefined ? 0 : (temporalHint - temporalMin) / temporalSpan - 0.5;
+      const temporalNormalized =
+        temporalHint === undefined ? 0 : (temporalHint - temporalMin) / temporalSpan - 0.5;
       // Temporal hints may refine a topological layer by at most 40% of layer spacing.
-      const temporalOffset = clamp(temporalNormalized * weights.temporalHints, -0.4, 0.4) * spacing.y;
+      const temporalOffset =
+        clamp(temporalNormalized * weights.temporalHints, -0.4, 0.4) * spacing.y;
       const y = layer * spacing.y + temporalOffset;
       const pinned = input.constraints?.pinnedNodes?.[node.id];
       positions[node.id] = pinned ?? [x, y, z];
@@ -463,7 +463,11 @@ export class LayoutEngine {
         });
       } else {
         // Defensive correction against extreme weighting/rounding; topological layers remain authoritative.
-        positions[edge.target] = [target[0], source[1] + Math.max(0.001, spacing.y * 0.2), target[2]];
+        positions[edge.target] = [
+          target[0],
+          source[1] + Math.max(0.001, spacing.y * 0.2),
+          target[2],
+        ];
       }
     }
 

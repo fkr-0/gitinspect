@@ -27,8 +27,12 @@ export type {
 export { resolveNodePositions } from "./world/mapping";
 export type { DataMapper, GraphDatasetView, MappingContext } from "./world/mapping";
 
-export { GraphNodeLayer } from "./nodes/GraphNodeLayer";
-export type { GraphNodeLayerProps } from "./nodes/GraphNodeLayer";
+export { GraphNodeLayer, nodeInteractionForInstance } from "./nodes/GraphNodeLayer";
+export type {
+  GraphNodeInteractionEvent,
+  GraphNodeInteractionHandlers,
+  GraphNodeLayerProps,
+} from "./nodes/GraphNodeLayer";
 export {
   GraphEdgeLayer,
   edgeInteractionForHead,

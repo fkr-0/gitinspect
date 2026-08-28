@@ -1,10 +1,30 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
-import { Color, InstancedMesh, Matrix4, Vector3 } from "three";
-import type { NodeRenderPlan, PlannedNodeBatch, PlannedNodeLabel } from "../rendering/types";
+import type { ThreeEvent } from "@react-three/fiber";
+import { Color, type InstancedMesh, Matrix4, Vector3 } from "three";
+import type { ModifierState, PickReference } from "../interaction";
+import type {
+  NodeRenderPlan,
+  PlannedNodeBatch,
+  PlannedNodeLabel,
+  SemanticRenderIdentity,
+} from "../rendering/types";
+
+export interface GraphNodeInteractionEvent {
+  readonly reference: PickReference;
+  readonly identity: SemanticRenderIdentity;
+  readonly modifiers: ModifierState;
+}
+
+export interface GraphNodeInteractionHandlers {
+  readonly onClick?: (event: GraphNodeInteractionEvent) => void;
+  readonly onContextMenu?: (event: GraphNodeInteractionEvent) => void;
+  readonly onHoverChange?: (event: GraphNodeInteractionEvent | undefined) => void;
+}
 
 export interface GraphNodeLayerProps {
   readonly plan: NodeRenderPlan;
   readonly renderLabel?: (label: PlannedNodeLabel) => ReactNode;
+  readonly interaction?: GraphNodeInteractionHandlers;
 }
 
 function PrimitiveGeometry({ primitive }: Pick<PlannedNodeBatch, "primitive">) {
@@ -24,7 +44,41 @@ function PrimitiveGeometry({ primitive }: Pick<PlannedNodeBatch, "primitive">) {
   }
 }
 
-function NodeBatch({ batch }: { readonly batch: PlannedNodeBatch }) {
+export function nodeInteractionForInstance(
+  batch: PlannedNodeBatch,
+  instanceId: number,
+  modifiers: ModifierState = {},
+): GraphNodeInteractionEvent | undefined {
+  const identity = batch.instances[instanceId];
+  if (!identity) return undefined;
+  return {
+    reference: { objectId: batch.key, instanceId },
+    identity,
+    modifiers,
+  };
+}
+
+function semanticInteractionEvent(
+  batch: PlannedNodeBatch,
+  event: ThreeEvent<MouseEvent | PointerEvent>,
+): GraphNodeInteractionEvent | undefined {
+  const instanceId = event.instanceId;
+  if (instanceId === undefined) return undefined;
+  return nodeInteractionForInstance(batch, instanceId, {
+    shift: event.nativeEvent.shiftKey,
+    ctrl: event.nativeEvent.ctrlKey,
+    meta: event.nativeEvent.metaKey,
+    alt: event.nativeEvent.altKey,
+  });
+}
+
+function NodeBatch({
+  batch,
+  interaction,
+}: {
+  readonly batch: PlannedNodeBatch;
+  readonly interaction?: GraphNodeInteractionHandlers;
+}) {
   const meshRef = useRef<InstancedMesh>(null);
 
   useLayoutEffect(() => {
@@ -62,6 +116,41 @@ function NodeBatch({ batch }: { readonly batch: PlannedNodeBatch }) {
           interactionKey,
         })),
       }}
+      {...(interaction?.onClick
+        ? {
+            onClick: (event: ThreeEvent<MouseEvent>) => {
+              const semantic = semanticInteractionEvent(batch, event);
+              if (!semantic) return;
+              event.stopPropagation();
+              interaction.onClick?.(semantic);
+            },
+          }
+        : {})}
+      {...(interaction?.onContextMenu
+        ? {
+            onContextMenu: (event: ThreeEvent<MouseEvent>) => {
+              const semantic = semanticInteractionEvent(batch, event);
+              if (!semantic) return;
+              event.nativeEvent.preventDefault();
+              event.stopPropagation();
+              interaction.onContextMenu?.(semantic);
+            },
+          }
+        : {})}
+      {...(interaction?.onHoverChange
+        ? {
+            onPointerOver: (event: ThreeEvent<PointerEvent>) => {
+              const semantic = semanticInteractionEvent(batch, event);
+              if (!semantic) return;
+              event.stopPropagation();
+              interaction.onHoverChange?.(semantic);
+            },
+            onPointerOut: (event: ThreeEvent<PointerEvent>) => {
+              event.stopPropagation();
+              interaction.onHoverChange?.(undefined);
+            },
+          }
+        : {})}
     >
       <PrimitiveGeometry primitive={batch.primitive} />
       <meshStandardMaterial
@@ -75,13 +164,20 @@ function NodeBatch({ batch }: { readonly batch: PlannedNodeBatch }) {
   );
 }
 
-export function GraphNodeLayer({ plan, renderLabel }: GraphNodeLayerProps) {
+export function GraphNodeLayer({ plan, renderLabel, interaction }: GraphNodeLayerProps) {
   return (
     <group name="graph-node-layer">
-      {plan.batches.map((batch) => <NodeBatch key={batch.key} batch={batch} />)}
-      {plan.labels.map((label) => renderLabel
-        ? <group key={`${label.ownerId}:${label.elementId}`}>{renderLabel(label)}</group>
-        : (
+      {plan.batches.map((batch) => (
+        <NodeBatch
+          key={batch.key}
+          batch={batch}
+          {...(interaction === undefined ? {} : { interaction })}
+        />
+      ))}
+      {plan.labels.map((label) =>
+        renderLabel ? (
+          <group key={`${label.ownerId}:${label.elementId}`}>{renderLabel(label)}</group>
+        ) : (
           <group
             key={`${label.ownerId}:${label.elementId}`}
             name="graph-label-placeholder"
@@ -94,7 +190,8 @@ export function GraphNodeLayer({ plan, renderLabel }: GraphNodeLayerProps) {
               metadata: label.metadata,
             }}
           />
-        ))}
+        ),
+      )}
     </group>
   );
 }

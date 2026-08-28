@@ -69,12 +69,7 @@ export interface EdgeVisualDescriptor {
   readonly head?: "arrow" | "diamond" | "none";
 }
 
-export type SelectionGranularity =
-  | "sub-element"
-  | "node"
-  | "edge-group"
-  | "chain"
-  | "cluster";
+export type SelectionGranularity = "sub-element" | "node" | "edge-group" | "chain" | "cluster";
 
 export interface SelectionState {
   readonly elementId?: ElementId;
@@ -107,7 +102,14 @@ export interface GitCommitFileChange {
   readonly additions: number;
   readonly deletions: number;
   readonly bytes?: number;
-  readonly status: "added" | "modified" | "deleted" | "renamed" | "copied" | "typechange" | "unknown";
+  readonly status:
+    | "added"
+    | "modified"
+    | "deleted"
+    | "renamed"
+    | "copied"
+    | "typechange"
+    | "unknown";
 }
 
 export interface GitCommitRecord {
@@ -165,6 +167,46 @@ export interface GitCommitDiff {
   readonly oid: string;
   readonly parentOid?: string;
   readonly files: readonly GitCommitFileChange[];
+  readonly truncated: boolean;
+}
+
+export interface GitFileDetailOptions {
+  readonly maxBlobBytes: number;
+  readonly maxPatchLines: number;
+  readonly contextLines: number;
+}
+
+export type GitPatchLineKind = "context" | "addition" | "deletion";
+
+export interface GitPatchLine {
+  readonly kind: GitPatchLineKind;
+  readonly oldLine?: number;
+  readonly newLine?: number;
+  readonly content: string;
+}
+
+export interface GitPatchHunk {
+  readonly oldStart: number;
+  readonly oldLines: number;
+  readonly newStart: number;
+  readonly newLines: number;
+  readonly lines: readonly GitPatchLine[];
+}
+
+export type GitFileContentStatus = "text" | "binary" | "too-large" | "opaque" | "unavailable";
+
+export interface GitCommitFileDetail {
+  readonly oid: string;
+  readonly parentOid?: string;
+  readonly path: string;
+  readonly status: GitCommitFileChange["status"];
+  readonly kind: GitCommitFileChange["kind"];
+  readonly oldOid?: string;
+  readonly newOid?: string;
+  readonly oldBytes?: number;
+  readonly newBytes?: number;
+  readonly contentStatus: GitFileContentStatus;
+  readonly hunks: readonly GitPatchHunk[];
   readonly truncated: boolean;
 }
 

@@ -1,7 +1,7 @@
 import type { ElementId, SelectionGranularity, SelectionState } from "@gitinspect/contracts";
 
 import type { PickReference, SemanticPickRecord } from "./PickRegistry";
-import { PickRegistry } from "./PickRegistry";
+import type { PickRegistry } from "./PickRegistry";
 
 export interface ModifierState {
   readonly shift?: boolean;
@@ -71,14 +71,21 @@ export class InteractionManager {
 
   public hover(reference: PickReference | undefined): HoverState | undefined {
     const record = reference === undefined ? undefined : this.picks.resolve(reference);
-    if (record === this.hoverState?.record || (record === undefined && this.hoverState === undefined)) {
+    if (
+      record === this.hoverState?.record ||
+      (record === undefined && this.hoverState === undefined)
+    ) {
       return this.hoverState;
     }
 
     this.cancelHoverTimer();
     const token = ++this.hoverToken;
     this.hoverState = record === undefined ? undefined : { record, tooltipVisible: false };
-    this.emit(this.hoverState === undefined ? { type: "hover-change" } : { type: "hover-change", hover: this.hoverState });
+    this.emit(
+      this.hoverState === undefined
+        ? { type: "hover-change" }
+        : { type: "hover-change", hover: this.hoverState },
+    );
 
     if (record !== undefined) {
       if (this.tooltipDelayMs === 0) {
@@ -94,7 +101,10 @@ export class InteractionManager {
     this.hover(undefined);
   }
 
-  public click(reference: PickReference, modifiers: ModifierState = {}): SelectionState | undefined {
+  public click(
+    reference: PickReference,
+    modifiers: ModifierState = {},
+  ): SelectionState | undefined {
     const record = this.picks.resolve(reference);
     if (record === undefined) return undefined;
     const selection = this.selectionFor(record, modifiers);

@@ -136,7 +136,10 @@ export function computeLodTier(
   return "hidden";
 }
 
-function bucketKey(node: LodLogicalNode, bucketSize: number): { readonly id: string; readonly semantic: string } {
+function bucketKey(
+  node: LodLogicalNode,
+  bucketSize: number,
+): { readonly id: string; readonly semantic: string } {
   const x = Math.floor(node.position[0] / bucketSize);
   const y = Math.floor(node.position[1] / bucketSize);
   const z = Math.floor(node.position[2] / bucketSize);
@@ -194,8 +197,10 @@ export function planLod(input: LodPlanningInput): LodRenderPlan {
     .map((bucket) => {
       bucket.memberIds.sort((a, b) => a.localeCompare(b));
       const count = bucket.memberIds.length;
-      const dominantKind = [...bucket.kindCounts]
-        .sort(([aKind, aCount], [bKind, bCount]) => bCount - aCount || aKind.localeCompare(bKind))[0]?.[0] ?? "unknown";
+      const dominantKind =
+        [...bucket.kindCounts].sort(
+          ([aKind, aCount], [bKind, bCount]) => bCount - aCount || aKind.localeCompare(bKind),
+        )[0]?.[0] ?? "unknown";
       return {
         id: bucket.id,
         tier: "aggregate",
@@ -214,7 +219,10 @@ export function planLod(input: LodPlanningInput): LodRenderPlan {
     (hiddenIds?.length ?? 0);
   // A conservative accounting model for planner-owned scalar/reference storage, useful for CI regressions.
   const estimatedPlanBytes =
-    retainedIdentityReferences * 24 + aggregates.length * 160 + (full.length + simplified.length) * 32 + 256;
+    retainedIdentityReferences * 24 +
+    aggregates.length * 160 +
+    (full.length + simplified.length) * 32 +
+    256;
   const hidden: LodHiddenPlan =
     hiddenIds === undefined
       ? { tier: "hidden", count: hiddenCount }

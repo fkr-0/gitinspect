@@ -63,7 +63,9 @@ describe("TransactionManager", () => {
     await manager.preview("r1");
     await manager.confirm("r1");
     await manager.apply("r1");
-    expect(domain.apply).toHaveBeenCalledWith(expect.objectContaining({ confirmationToken: "opaque-adapter-proof" }));
+    expect(domain.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ confirmationToken: "opaque-adapter-proof" }),
+    );
   });
 
   it("supports cancellation and records adapter failures as terminal", async () => {

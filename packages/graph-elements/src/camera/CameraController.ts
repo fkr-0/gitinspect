@@ -115,6 +115,24 @@ export class CameraController {
       : { ...base, attachedNodeId: this.state.attachedNodeId };
   }
 
+  public restore(camera: CameraState): CameraControllerSnapshot {
+    const mouseMode = this.state.mouseMode;
+    const zoom = clamp(camera.zoom, this.options.minZoom, this.options.maxZoom);
+    this.transition = undefined;
+    this.attachedDistance = Math.max(EPSILON, distance(camera.position, camera.target)) * zoom;
+    this.state = {
+      mode: camera.mode,
+      position: copy(camera.position),
+      target: copy(camera.target),
+      attachedNodeId: camera.mode === "attached" ? camera.attachedNodeId : undefined,
+      zoom,
+      orientation: orientationFromDirection(sub(camera.target, camera.position)),
+      velocity: [0, 0, 0],
+      mouseMode,
+    };
+    return this.snapshot();
+  }
+
   public setMouseMode(mode: MouseMode): void {
     this.state.mouseMode = mode;
   }
@@ -184,16 +202,20 @@ export class CameraController {
     if (!Number.isFinite(factor) || factor <= 0) {
       throw new Error("Zoom factor must be a positive finite number");
     }
-    this.state.zoom = clamp(
-      this.state.zoom * factor,
-      this.options.minZoom,
-      this.options.maxZoom,
-    );
+    this.state.zoom = clamp(this.state.zoom * factor, this.options.minZoom, this.options.maxZoom);
     if (this.state.mode === "attached") {
       this.transition = undefined;
       this.repositionAttachedCamera();
     }
     return this.state.zoom;
+  }
+
+  public enterAttached(): void {
+    this.transition = undefined;
+    this.state.mode = "attached";
+    this.state.velocity = [0, 0, 0];
+    this.attachedDistance =
+      Math.max(EPSILON, distance(this.state.position, this.state.target)) * this.state.zoom;
   }
 
   public enterFreeFlight(): void {
@@ -273,10 +295,7 @@ export class CameraController {
     const worldAcceleration = localMovementToWorld(movement, this.state.orientation);
     this.state.velocity = add(
       this.state.velocity,
-      scale(
-        worldAcceleration,
-        this.options.acceleration * speedScale * worldScale * deltaSeconds,
-      ),
+      scale(worldAcceleration, this.options.acceleration * speedScale * worldScale * deltaSeconds),
     );
 
     this.state.position = add(this.state.position, scale(this.state.velocity, deltaSeconds));

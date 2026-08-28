@@ -65,7 +65,11 @@ describe("CameraController", () => {
 
     expect(state.position).not.toEqual([0, 0, -5]);
     expect(state.velocity[2]).toBeGreaterThan(0);
-    expect(state.orientation).toMatchObject({ yaw: expect.any(Number), pitch: expect.any(Number), roll: 0.3 });
+    expect(state.orientation).toMatchObject({
+      yaw: expect.any(Number),
+      pitch: expect.any(Number),
+      roll: 0.3,
+    });
   });
 
   it("orbits and zooms in attached mode around the same target", () => {
@@ -84,5 +88,56 @@ describe("CameraController", () => {
     expect(state.target).toEqual([0, 0, 0]);
     expect(state.zoom).toBe(2);
     expect(Math.hypot(...state.position)).toBeCloseTo(5);
+  });
+
+  it("restores serialized navigation camera state without stealing pointer ownership", () => {
+    const camera = new CameraController({
+      mode: "attached",
+      position: [0, 0, -5],
+      target: [0, 0, 0],
+      attachedNodeId: "a",
+      zoom: 1,
+    });
+    camera.setMouseMode("cursor");
+    camera.enterFreeFlight();
+    camera.tick(0.1, { movement: [0, 0, 1] });
+
+    const restored = camera.restore({
+      mode: "attached",
+      position: [12, 4, 8],
+      target: [2, 1, -3],
+      attachedNodeId: "commit:restored",
+      zoom: 1.5,
+    });
+
+    expect(restored).toMatchObject({
+      mode: "attached",
+      position: [12, 4, 8],
+      target: [2, 1, -3],
+      attachedNodeId: "commit:restored",
+      zoom: 1.5,
+      velocity: [0, 0, 0],
+      mouseMode: "cursor",
+      transitioning: false,
+    });
+  });
+
+  it("can return to attached navigation without inventing a semantic node id", () => {
+    const camera = new CameraController({
+      mode: "free-flight",
+      position: [3, 2, 1],
+      target: [3, 2, 2],
+      zoom: 1,
+    });
+
+    camera.enterAttached();
+
+    expect(camera.snapshot()).toMatchObject({
+      mode: "attached",
+      position: [3, 2, 1],
+      target: [3, 2, 2],
+      velocity: [0, 0, 0],
+    });
+    expect(camera.snapshot().attachedNodeId).toBeUndefined();
   });
 });

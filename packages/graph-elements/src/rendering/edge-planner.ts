@@ -1,13 +1,5 @@
-import type {
-  EdgeVisualDescriptor,
-  ElementId,
-  GraphEdgeRecord,
-  Vec3,
-} from "@gitinspect/contracts";
-import {
-  defaultEdgeStyleRegistry,
-  type EdgeStyleRegistry,
-} from "../edges/EdgeStyleRegistry";
+import type { EdgeVisualDescriptor, ElementId, GraphEdgeRecord, Vec3 } from "@gitinspect/contracts";
+import { defaultEdgeStyleRegistry, type EdgeStyleRegistry } from "../edges/EdgeStyleRegistry";
 import type {
   EdgeRenderPlan,
   EdgeRouteMap,
@@ -42,34 +34,29 @@ function normalize(v: Vec3): Vec3 {
 }
 
 function cross(a: Vec3, b: Vec3): Vec3 {
-  return [
-    a[1] * b[2] - a[2] * b[1],
-    a[2] * b[0] - a[0] * b[2],
-    a[0] * b[1] - a[1] * b[0],
-  ];
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 }
 
 function equal(a: Vec3, b: Vec3): boolean {
-  return Math.abs(a[0] - b[0]) <= EPSILON
-    && Math.abs(a[1] - b[1]) <= EPSILON
-    && Math.abs(a[2] - b[2]) <= EPSILON;
+  return (
+    Math.abs(a[0] - b[0]) <= EPSILON &&
+    Math.abs(a[1] - b[1]) <= EPSILON &&
+    Math.abs(a[2] - b[2]) <= EPSILON
+  );
 }
 
 function dedupeConsecutive(points: readonly Vec3[]): Vec3[] {
   const result: Vec3[] = [];
   for (const point of points) {
-    if (result.length === 0 || !equal(result[result.length - 1]!, point)) {
+    const last = result[result.length - 1];
+    if (result.length === 0 || !last || !equal(last, point)) {
       result.push(point);
     }
   }
   return result;
 }
 
-function routedPoints(
-  source: Vec3,
-  target: Vec3,
-  route: readonly Vec3[] | undefined,
-): Vec3[] {
+function routedPoints(source: Vec3, target: Vec3, route: readonly Vec3[] | undefined): Vec3[] {
   if (!route || route.length === 0) return [source, target];
   const interior = route.filter((point) => !equal(point, source) && !equal(point, target));
   return dedupeConsecutive([source, ...interior, target]);
@@ -114,7 +101,10 @@ function pathPoints(
 
   const result: Vec3[] = [];
   for (let index = 0; index < routed.length - 1; index += 1) {
-    const segment = waveSegment(routed[index]!, routed[index + 1]!, style);
+    const start = routed[index];
+    const end = routed[index + 1];
+    if (!start || !end) continue;
+    const segment = waveSegment(start, end, style);
     if (index > 0) segment.shift();
     result.push(...segment);
   }
@@ -137,7 +127,11 @@ function headBatchKey(head: PlannedEdgeHead): string {
   return `${head.kind}|${head.color.toLowerCase()}|o:${head.opacity.toFixed(4)}`;
 }
 
-function semantic(edgeId: ElementId): { ownerId: ElementId; elementId: string; interactionKey: string } {
+function semantic(edgeId: ElementId): {
+  ownerId: ElementId;
+  elementId: string;
+  interactionKey: string;
+} {
   return { ownerId: edgeId, elementId: edgeId, interactionKey: edgeId };
 }
 
@@ -148,7 +142,9 @@ export function planEdgeRendering(
   registry: EdgeStyleRegistry = defaultEdgeStyleRegistry,
   routes?: EdgeRouteMap,
 ): EdgeRenderPlan {
-  const descriptorsById = new Map(descriptors.map((descriptor) => [descriptor.edgeId, descriptor] as const));
+  const descriptorsById = new Map(
+    descriptors.map((descriptor) => [descriptor.edgeId, descriptor] as const),
+  );
   const batchMap = new Map<string, { style: ResolvedEdgeStyle; segments: PlannedEdgeSegment[] }>();
   const headMap = new Map<string, { exemplar: PlannedEdgeHead; heads: PlannedEdgeHead[] }>();
   const diagnostics: EdgeRenderPlan["diagnostics"][number][] = [];
@@ -182,17 +178,21 @@ export function planEdgeRendering(
     }
 
     for (let index = 0; index < points.length - 1; index += 1) {
+      const start = points[index];
+      const end = points[index + 1];
+      if (!start || !end) continue;
       batch.segments.push({
         ...semantic(edge.id),
         edgeId: edge.id,
         segmentIndex: index,
-        start: points[index]!,
-        end: points[index + 1]!,
+        start,
+        end,
       });
     }
 
     if (style.head !== "none") {
-      const previous = points[points.length - 2]!;
+      const previous = points[points.length - 2];
+      if (!previous) continue;
       const head: PlannedEdgeHead = {
         ...semantic(edge.id),
         edgeId: edge.id,

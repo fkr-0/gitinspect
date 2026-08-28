@@ -21,11 +21,25 @@ describe("LOD planning", () => {
       aggregateDistance: 40,
       importanceDistanceScale: 1,
     };
-    expect(computeLodTier({ id: "near", kind: "n", position: [5, 0, 0] }, camera, thresholds)).toBe("full");
-    expect(computeLodTier({ id: "mid", kind: "n", position: [15, 0, 0] }, camera, thresholds)).toBe("simplified");
-    expect(computeLodTier({ id: "far", kind: "n", position: [30, 0, 0] }, camera, thresholds)).toBe("aggregate");
-    expect(computeLodTier({ id: "gone", kind: "n", position: [50, 0, 0] }, camera, thresholds)).toBe("hidden");
-    expect(computeLodTier({ id: "important", kind: "n", position: [30, 0, 0], importance: 3 }, camera, thresholds)).toBe("full");
+    expect(computeLodTier({ id: "near", kind: "n", position: [5, 0, 0] }, camera, thresholds)).toBe(
+      "full",
+    );
+    expect(computeLodTier({ id: "mid", kind: "n", position: [15, 0, 0] }, camera, thresholds)).toBe(
+      "simplified",
+    );
+    expect(computeLodTier({ id: "far", kind: "n", position: [30, 0, 0] }, camera, thresholds)).toBe(
+      "aggregate",
+    );
+    expect(
+      computeLodTier({ id: "gone", kind: "n", position: [50, 0, 0] }, camera, thresholds),
+    ).toBe("hidden");
+    expect(
+      computeLodTier(
+        { id: "important", kind: "n", position: [30, 0, 0], importance: 3 },
+        camera,
+        thresholds,
+      ),
+    ).toBe("full");
   });
 
   it("builds deterministic spatial/semantic buckets and preserves member IDs", () => {
@@ -44,7 +58,9 @@ describe("LOD planning", () => {
     const second = planLod(options);
     expect(second.aggregates).toEqual(first.aggregates);
     expect(first.aggregates).toHaveLength(2);
-    expect(first.aggregates.find((bucket) => bucket.semanticBucket === "history")?.memberIds).toEqual(["a", "c"]);
+    expect(
+      first.aggregates.find((bucket) => bucket.semanticBucket === "history")?.memberIds,
+    ).toEqual(["a", "c"]);
   });
 
   it("promotes selected, hovered, and search-hit nodes out of aggregate/hidden tiers", () => {

@@ -19,5 +19,3 @@ declare module "react/jsx-dev-runtime" {
     interface IntrinsicElements extends ThreeElements {}
   }
 }
-
-export {};

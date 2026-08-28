@@ -17,7 +17,8 @@ export interface TransactionValidationContext<TOperation> {
   readonly liveRevision: string;
 }
 
-export interface TransactionPreviewContext<TOperation> extends TransactionValidationContext<TOperation> {}
+export interface TransactionPreviewContext<TOperation>
+  extends TransactionValidationContext<TOperation> {}
 
 export interface TransactionPreviewResult<TPreview> {
   readonly preview: TPreview;
@@ -49,8 +50,12 @@ export interface TransactionCancelContext<TOperation> {
 
 export interface TransactionDomainAdapter<TOperation, TPreview, TApplyResult> {
   validate(context: TransactionValidationContext<TOperation>): Promise<void> | void;
-  preview(context: TransactionPreviewContext<TOperation>): Promise<TransactionPreviewResult<TPreview>>;
-  confirm(context: TransactionConfirmationContext<TOperation, TPreview>): Promise<TransactionConfirmation>;
+  preview(
+    context: TransactionPreviewContext<TOperation>,
+  ): Promise<TransactionPreviewResult<TPreview>>;
+  confirm(
+    context: TransactionConfirmationContext<TOperation, TPreview>,
+  ): Promise<TransactionConfirmation>;
   apply(context: TransactionApplyContext<TOperation, TPreview>): Promise<TApplyResult>;
   cancel?(context: TransactionCancelContext<TOperation>): Promise<void> | void;
 }
@@ -85,7 +90,9 @@ export class StaleTransactionError extends Error {
   readonly liveRevision: string;
 
   constructor(baseRevision: string, liveRevision: string) {
-    super(`Transaction base revision ${baseRevision} is stale relative to live revision ${liveRevision}.`);
+    super(
+      `Transaction base revision ${baseRevision} is stale relative to live revision ${liveRevision}.`,
+    );
     this.name = "StaleTransactionError";
     this.baseRevision = baseRevision;
     this.liveRevision = liveRevision;
@@ -138,8 +145,12 @@ export class TransactionManager<TOperation, TPreview, TApplyResult = void> {
       state: this.stateValue,
       operations: [...this.operationsValue],
       ...(this.previewValue === undefined ? {} : { preview: this.previewValue }),
-      ...(this.previewRevisionValue === undefined ? {} : { previewRevision: this.previewRevisionValue }),
-      ...(this.confirmationTokenValue === undefined ? {} : { confirmationToken: this.confirmationTokenValue }),
+      ...(this.previewRevisionValue === undefined
+        ? {}
+        : { previewRevision: this.previewRevisionValue }),
+      ...(this.confirmationTokenValue === undefined
+        ? {}
+        : { confirmationToken: this.confirmationTokenValue }),
       ...(this.resultValue === undefined ? {} : { result: this.resultValue }),
       ...(this.failureReasonValue === undefined ? {} : { failureReason: this.failureReasonValue }),
     };
@@ -184,13 +195,15 @@ export class TransactionManager<TOperation, TPreview, TApplyResult = void> {
       this.assertFresh(liveRevision);
       const preview = this.requirePreview();
       const previewRevision = this.requirePreviewRevision();
-      if (previewRevision !== liveRevision) throw new StaleTransactionError(previewRevision, liveRevision);
+      if (previewRevision !== liveRevision)
+        throw new StaleTransactionError(previewRevision, liveRevision);
       const confirmation = await this.adapter.confirm({
         ...this.validationContext(liveRevision),
         preview,
         previewRevision,
       });
-      if (confirmation.token.length === 0) throw new Error("Domain adapter returned an empty confirmation token.");
+      if (confirmation.token.length === 0)
+        throw new Error("Domain adapter returned an empty confirmation token.");
       this.confirmationTokenValue = confirmation.token;
       this.stateValue = "confirmed";
       return confirmation.token;
@@ -208,7 +221,8 @@ export class TransactionManager<TOperation, TPreview, TApplyResult = void> {
       const preview = this.requirePreview();
       const previewRevision = this.requirePreviewRevision();
       const confirmationToken = this.confirmationTokenValue;
-      if (confirmationToken === undefined) throw new TransactionStateError("Confirmed transaction has no adapter token.");
+      if (confirmationToken === undefined)
+        throw new TransactionStateError("Confirmed transaction has no adapter token.");
       this.stateValue = "applying";
       const result = await this.adapter.apply({
         ...this.validationContext(liveRevision),
@@ -228,8 +242,14 @@ export class TransactionManager<TOperation, TPreview, TApplyResult = void> {
   }
 
   async cancel(): Promise<void> {
-    if (this.stateValue === "applied" || this.stateValue === "failed" || this.stateValue === "cancelled") {
-      throw new TransactionStateError(`Cannot cancel terminal transaction in state ${this.stateValue}.`);
+    if (
+      this.stateValue === "applied" ||
+      this.stateValue === "failed" ||
+      this.stateValue === "cancelled"
+    ) {
+      throw new TransactionStateError(
+        `Cannot cancel terminal transaction in state ${this.stateValue}.`,
+      );
     }
     const state = this.stateValue;
     try {
@@ -281,12 +301,14 @@ export class TransactionManager<TOperation, TPreview, TApplyResult = void> {
   }
 
   private requirePreview(): TPreview {
-    if (this.previewValue === undefined) throw new TransactionStateError("Transaction preview is unavailable.");
+    if (this.previewValue === undefined)
+      throw new TransactionStateError("Transaction preview is unavailable.");
     return this.previewValue;
   }
 
   private requirePreviewRevision(): string {
-    if (this.previewRevisionValue === undefined) throw new TransactionStateError("Preview revision is unavailable.");
+    if (this.previewRevisionValue === undefined)
+      throw new TransactionStateError("Preview revision is unavailable.");
     return this.previewRevisionValue;
   }
 }

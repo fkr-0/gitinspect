@@ -1,4 +1,9 @@
-import type { ElementId, NodeVisualDescriptor, Vec3, VisualElementDescriptor } from "@gitinspect/contracts";
+import type {
+  ElementId,
+  NodeVisualDescriptor,
+  Vec3,
+  VisualElementDescriptor,
+} from "@gitinspect/contracts";
 import type {
   MeshPrimitive,
   NodeRenderPlan,
@@ -36,11 +41,7 @@ function identity(nodeId: ElementId, element: VisualElementDescriptor): Semantic
     : { ownerId: nodeId, elementId: element.id, interactionKey: element.interactionKey };
 }
 
-function materialBatchKey(
-  primitive: MeshPrimitive,
-  opacity: number,
-  emissive: string,
-): string {
+function materialBatchKey(primitive: MeshPrimitive, opacity: number, emissive: string): string {
   return `${primitive}|o:${opacity.toFixed(4)}|e:${emissive.toLowerCase()}`;
 }
 
@@ -48,7 +49,15 @@ export function planNodeRendering(
   descriptors: readonly NodeVisualDescriptor[],
   nodePositions: ReadonlyMap<ElementId, Vec3> = new Map(),
 ): NodeRenderPlan {
-  const batchMap = new Map<string, { primitive: MeshPrimitive; opacity: number; emissive: string; instances: PlannedNodeInstance[] }>();
+  const batchMap = new Map<
+    string,
+    {
+      primitive: MeshPrimitive;
+      opacity: number;
+      emissive: string;
+      instances: PlannedNodeInstance[];
+    }
+  >();
   const labels: PlannedNodeLabel[] = [];
   const ignored: SemanticRenderIdentity[] = [];
 

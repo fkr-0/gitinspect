@@ -5,6 +5,8 @@ export interface WorldNavigationFrame<TDataset extends GraphDataset = GraphDatas
   readonly dataset: TDataset;
   readonly mapperKey: string;
   readonly layoutKey: string;
+  /** Optional domain-neutral semantic selection restored with this world frame. */
+  readonly selectionId?: ElementId;
   readonly camera: CameraState;
 }
 
@@ -32,7 +34,9 @@ function cloneCamera(camera: CameraState): CameraState {
   };
 }
 
-function snapshotFrame<TDataset extends GraphDataset>(frame: WorldNavigationFrame<TDataset>): WorldNavigationFrame<TDataset> {
+function snapshotFrame<TDataset extends GraphDataset>(
+  frame: WorldNavigationFrame<TDataset>,
+): WorldNavigationFrame<TDataset> {
   return Object.freeze({ ...frame, camera: Object.freeze(cloneCamera(frame.camera)) });
 }
 
@@ -57,14 +61,22 @@ export class WorldNavigationStack<TDataset extends GraphDataset = GraphDataset> 
   }
 
   snapshot(): WorldNavigationSnapshot<TDataset> {
-    return Object.freeze({ current: this.currentValue, history: Object.freeze([...this.historyValue]) });
+    return Object.freeze({
+      current: this.currentValue,
+      history: Object.freeze([...this.historyValue]),
+    });
   }
 
   async enter(elementId: ElementId): Promise<boolean> {
     const parent = this.currentValue;
     const generation = ++this.resolveGeneration;
     const child = await this.resolver({ parent, elementId });
-    if (generation !== this.resolveGeneration || this.currentValue !== parent || child === undefined) return false;
+    if (
+      generation !== this.resolveGeneration ||
+      this.currentValue !== parent ||
+      child === undefined
+    )
+      return false;
     this.historyValue = [...this.historyValue, parent];
     this.currentValue = snapshotFrame(child);
     return true;

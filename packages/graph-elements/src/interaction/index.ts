@@ -1,4 +1,8 @@
-export { InteractionManager, granularityFromModifiers, resolveAvailableGranularity } from "./InteractionManager";
+export {
+  InteractionManager,
+  granularityFromModifiers,
+  resolveAvailableGranularity,
+} from "./InteractionManager";
 export { PickRegistry } from "./PickRegistry";
 export type {
   HoverState,

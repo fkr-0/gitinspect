@@ -1,16 +1,8 @@
 import { useMemo, type ReactNode } from "react";
-import type {
-  ElementId,
-  GraphEdgeRecord,
-  GraphNodeRecord,
-  Vec3,
-} from "@gitinspect/contracts";
+import type { ElementId, GraphEdgeRecord, GraphNodeRecord, Vec3 } from "@gitinspect/contracts";
 import { GraphEdgeLayer, type GraphEdgeInteractionHandlers } from "../edges/GraphEdgeLayer";
-import {
-  defaultEdgeStyleRegistry,
-  type EdgeStyleRegistry,
-} from "../edges/EdgeStyleRegistry";
-import { GraphNodeLayer } from "../nodes/GraphNodeLayer";
+import { defaultEdgeStyleRegistry, type EdgeStyleRegistry } from "../edges/EdgeStyleRegistry";
+import { GraphNodeLayer, type GraphNodeInteractionHandlers } from "../nodes/GraphNodeLayer";
 import { planEdgeRendering } from "../rendering/edge-planner";
 import { planNodeRendering } from "../rendering/node-planner";
 import type { EdgeRouteMap, PlannedNodeLabel } from "../rendering/types";
@@ -75,6 +67,7 @@ export interface GraphWorldProps<
   readonly lighting?: Partial<GraphLightingConfig>;
   readonly background?: GraphBackgroundConfig | null;
   readonly renderLabel?: (label: PlannedNodeLabel) => ReactNode;
+  readonly nodeInteraction?: GraphNodeInteractionHandlers;
   readonly edgeInteraction?: GraphEdgeInteractionHandlers;
 }
 
@@ -94,17 +87,21 @@ export function GraphWorld<
   lighting: lightingOverrides,
   background = DEFAULT_GRAPH_BACKGROUND,
   renderLabel,
+  nodeInteraction,
   edgeInteraction,
 }: GraphWorldProps<TNode, TEdge>) {
   const positions = useMemo(
     () => resolveNodePositions(dataset.nodes, nodePositions),
     [dataset.nodes, nodePositions],
   );
-  const mappingContext = useMemo<MappingContext<TNode, TEdge>>(() => ({
-    dataset,
-    revision: dataset.revision,
-    nodePositions: positions,
-  }), [dataset, positions]);
+  const mappingContext = useMemo<MappingContext<TNode, TEdge>>(
+    () => ({
+      dataset,
+      revision: dataset.revision,
+      nodePositions: positions,
+    }),
+    [dataset, positions],
+  );
   const nodeDescriptors = useMemo(
     () => dataset.nodes.map((node) => mapper.mapNode(node, mappingContext)),
     [dataset.nodes, mapper, mappingContext],
@@ -118,7 +115,8 @@ export function GraphWorld<
     [nodeDescriptors, positions],
   );
   const edgePlan = useMemo(
-    () => planEdgeRendering(dataset.edges, edgeDescriptors, positions, edgeStyleRegistry, edgeRoutes),
+    () =>
+      planEdgeRendering(dataset.edges, edgeDescriptors, positions, edgeStyleRegistry, edgeRoutes),
     [dataset.edges, edgeDescriptors, positions, edgeStyleRegistry, edgeRoutes],
   );
   const lighting = useMemo(() => resolveLighting(lightingOverrides), [lightingOverrides]);
@@ -153,9 +151,18 @@ export function GraphWorld<
           plan={edgePlan}
           {...(edgeInteraction === undefined ? {} : { interaction: edgeInteraction })}
         />
-        {renderLabel
-          ? <GraphNodeLayer plan={nodePlan} renderLabel={renderLabel} />
-          : <GraphNodeLayer plan={nodePlan} />}
+        {renderLabel ? (
+          <GraphNodeLayer
+            plan={nodePlan}
+            renderLabel={renderLabel}
+            {...(nodeInteraction === undefined ? {} : { interaction: nodeInteraction })}
+          />
+        ) : (
+          <GraphNodeLayer
+            plan={nodePlan}
+            {...(nodeInteraction === undefined ? {} : { interaction: nodeInteraction })}
+          />
+        )}
       </group>
     </>
   );
