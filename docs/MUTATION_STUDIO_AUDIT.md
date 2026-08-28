@@ -1,8 +1,8 @@
 # Mutation Studio Audit
 
-Status: **Phase 39 BLOCKED** for native projected-node accessibility determinism. Phase 38 remains COMPLETE/GREEN authority for preview-only transformed-topology continuity and controlled headed scheduling: hidden/unfocused native WebKit fails closed with zero accepted samples, while controlled visible/focused runs establish native cadence authority. Phase 39 fixes a concrete zero-height viewport projection defect and makes browser/native projected-node gates strict, but controlled native Tauri/WebKit reruns still intermittently time out waiting for a real authoritative transformed projected node. CPU planner timing remains separate and is never substituted for GPU evidence. A universal strict 16.7 ms frame-budget guarantee remains explicitly **unclaimed**.
+Status: **Phase 41 COMPLETE/GREEN** for isolated repeated native focus/projection acceptance. Phase 40 correctly failed closed when unrelated desktop activity repeatedly superseded the one permitted Tauri focus handoff. Phase 41 isolates qualification on an otherwise-unused i3 workspace and reproduces the unchanged real-node native contract three consecutive times: visible/focused throughout, 120 real rAF samples per run, zero focus/visibility transitions, selected authoritative transformed semantic ID projected with `aria-pressed=true`, exactly one roving tab stop, and an empty blocker. No production camera/projection/LOD/selection change was required. CPU planner timing remains separate and is never substituted for GPU evidence. A universal strict 16.7 ms frame-budget guarantee remains explicitly **unclaimed**.
 
-Authority boundary: Gitinspect mutation execution remains **disposable-copy preview only**. The application exposes no original-repository apply command. The Phase-28 through Phase-31 original-apply safety case remains **NO-GO** and is not reopened or weakened by Phase 39.
+Authority boundary: Gitinspect mutation execution remains **disposable-copy preview only**. The application exposes no original-repository apply command. The Phase-28 through Phase-31 original-apply safety case remains **NO-GO** and is not reopened or weakened by Phase 41.
 
 ## Phase-37 durable implementation commits
 
@@ -258,3 +258,45 @@ Original apply remains **NO-GO/unavailable**. No original-repository mutation co
 ## Next bounded tranche
 
 Phase 41 should remain preview-only and bounded to **isolated native focus authority + unchanged repeated projection acceptance**. Establish a controlled native desktop/window-manager condition in which the one permitted Tauri focus handoff is not immediately superseded by unrelated desktop activity; measure the external focus-steal source if that cannot be achieved. Then repeat the exact production real-node contract multiple times: visible/focused throughout, real authoritative transformed semantic ID, `aria-pressed=true`, exactly one roving tab stop, empty projected-node blocker, and no focus/visibility transitions. Do not add continuous refocusing, arbitrary delays, test-only overlays, projection/LOD relaxations, browser substitution, AT-SPI claims while disabled, or any original-apply capability. If the environment still cannot preserve focus, retain **BLOCKED_EXTERNAL_FOCUS** with measured evidence rather than changing production semantics.
+
+
+## Phase-41 isolated native focus authority closure
+
+Phase 41 makes no product/source change. The Phase-40 implementation/audit authority remains `eab58c1`, `144f965`, and `5c09c4c`; the new result is an environment-controlled repeated qualification of that unchanged strict native contract.
+
+Phase 40 measured unrelated desktop activity taking `_NET_ACTIVE_WINDOW` away from Tauri after the single permitted handoff, including Firefox Developer Edition on the shared i3 workspace 3. Phase 41 does not infer a deeper compositor, i3, X11, Firefox, or WebKit cause. Instead it uses an otherwise-unused i3 workspace **9** as the controlled qualification condition. Before every decisive run there are exactly zero `mutation_preview_native_smoke` processes and zero other headed Gitinspect native-smoke runners. Workspace 9 starts with `_NET_ACTIVE_WINDOW=0x0`; during each decisive run the read-only X11 monitor observes only the transition to the new Tauri `mutation_preview_native_smoke` window and no later external takeover.
+
+The first isolated pilot is green but deliberately excluded from the decisive count because its wrapper keyed the external handoff off the earlier GraphScene measurement marker. Three fresh serialized decisive runs wait for the exact `headed native focus handoff ready after GraphScene/WebGL convergence` marker, discover the exact newly-created Tauri window, and perform exactly one external `wmctrl -ia` handoff. There is no refocus loop, keep-alive click, hidden helper window, arbitrary success delay, test-only projected node, or semantic relaxation. Tauri's own existing `window.set_focus()` can make the window active before the external handoff; all three decisive handoffs therefore have the same exact Tauri ID before and after. The acceptance fact is that unrelated desktop activity never supersedes it afterward.
+
+Three consecutive decisive runs are green:
+
+| Run | Samples | baseline median/p95 | transition median/p95/max | topology commit | visibility changes | focus/blur events |
+| --- | ---: | --- | --- | ---: | ---: | --- |
+| 2 | 120 | 17/21 ms | 17/19/22 ms | 34 ms | 0 | 0/0 |
+| 3 | 120 | 17/22 ms | 17/20/23 ms | 46 ms | 0 | 0/0 |
+| 4 | 120 | 16/24 ms | 16/22/30 ms | 32 ms | 0 | 0/0 |
+
+Every decisive report has `frame_renderer=Apple GPU`, an empty timing blocker, `visibilityState=visible`, `documentHasFocus=true`, zero visibility/focus/blur transitions, and stable visible/focused maximum-gap provenance. Every run projects the real selected authoritative transformed semantic ID `commit:ffffffffffffffffffffffffffffffff00000003` and reports live/pressed/roving true with an empty accessibility blocker. The unchanged harness defines `roving=true` only if there are at least two real projected node buttons, exactly one button has `tabIndex=0`, that same button has `aria-pressed=true`, and its `data-element-id` matches the selected transformed ID. Thus Phase 41 qualifies **exactly one** roving tab stop on the real selected projected node rather than inferring it from a hidden graph model.
+
+The measured Phase-40 blocker is therefore resolved for qualification by desktop/workspace isolation: unrelated activity on the shared active workspace was the observed interference source, while the otherwise-unused workspace preserves focus authority across the repeated series. This is only an observed environment-control result; no deeper window-manager/compositor/WebKit mechanism is claimed. No visible/focused camera-restore, topology-fit, stale bridge, LOD/label, or projection-state defect is proven.
+
+Focused transformed-topology/preview interaction continuity remains **34/34** green. Fresh `scripts/release-check.sh --verify` at unchanged source HEAD `5c09c4c75b0bd5f89bc351d4ee7fef641bcc2bc1` is green: graph-elements **48/48**, app **149/149**, TypeScript/lint/build, gitinspect-core and Tauri fmt/clippy/tests/check, and whitespace gates all pass. Startup entry JS is **360.48 kB minified / 107.37 kB gzip**, below the <1 MB gate; deferred GraphScene is **1,037.23 kB / 281.54 kB gzip**.
+
+Fresh CPU/planner/search scale totals are 20.136 ms at 1k, 137.451 ms at 10k, and 1287.022 ms at 100k; the 100k fuzzy probe is 14.518 ms. These are CPU/planner/search measurements only and remain distinct from the native GPU/requestAnimationFrame evidence above. Browser hardware-WebGL was not rerun because native acceptance itself is now qualified; existing browser evidence remains supplemental only with `nativeFpsClaim=false`.
+
+AT-SPI remains an explicit environment boundary. `org.a11y.Bus.GetAddress` still returns the private bus path, but `org.a11y.Status` is now unavailable/not activatable and direct accessibility-bus introspection still fails. The strict projected DOM/native Tauri semantics above are green, but no independent native accessibility-tree or screen-reader success is claimed.
+
+Phase-41 durable evidence:
+
+- `.ws-bridge/evidence/gitinspect-phase41-headed-native.txt` — SHA256 `30e27e78b6b2712548fe35a10a41761ad5426ef002d2213204721d9e53f7f365`
+- `.ws-bridge/evidence/gitinspect-phase41-native-focus-monitor.txt` — SHA256 `848d025328b9706bf20dafdcf46cf12942717517ac2948d59c2b6608224420a6`
+- `.ws-bridge/evidence/gitinspect-phase41-interaction.txt` — SHA256 `882285f8212a2e8d3d57149e72f5a714abea94cc016e5c735e1ef1344a53daca`
+- `.ws-bridge/evidence/gitinspect-phase41-at-spi.txt` — SHA256 `14c458de9c19c21dbfa0beb79a6b8ca4735d380d132126ee6f73f938d297b54a`
+- `.ws-bridge/evidence/gitinspect-phase41-release-check.txt` — SHA256 `4f970c4117b8a657a1f75e75b2b5b960b7f15e1a4aac203a4601c28fe606b246`
+- `.ws-bridge/evidence/gitinspect-phase41-final.md` — SHA256 `57a5609d113c914b093eeb55912c39fe44b32bfcfa33f03d843de07180236ddc`
+
+Original apply remains **NO-GO/unavailable**. No original-repository mutation command, capability, UI enablement, authorization widening, safety-case reopening, publish, deploy, tag, or release action was introduced.
+
+## Next bounded tranche
+
+Phase 42 should durabilize the proven Phase-41 isolation recipe as a repository-owned, fail-closed release/operator qualification gate. It must discover/prove a genuinely unused controlled i3/X11 workspace or stop with an environment blocker, prove zero competing headed Gitinspect runners, wait for the exact WebGL-convergence readiness marker, perform at most one external Tauri handoff, record machine-checkable window/focus provenance, and require at least three unchanged strict native passes. It must never refocus continuously, disturb unrelated desktop windows, weaken projection/selection truth, substitute browser output, overclaim AT-SPI, or reopen original apply.
