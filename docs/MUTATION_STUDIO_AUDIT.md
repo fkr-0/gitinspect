@@ -299,7 +299,7 @@ Original apply remains **NO-GO/unavailable**. No original-repository mutation co
 
 ## Phase-42 fail-closed native release/operator gate
 
-Phase 42 adds repository-owned release tooling only; production projection, LOD, selection, mutation, and authorization semantics are unchanged. The operator entrypoint is `pnpm release:native-qualify`, backed by `scripts/native-release-qualification.sh` (final pre-commit SHA256 `7c74ce0d6b95ed40178417fcd48666153757cca5dd8781223cac194588dd2e0c`) and a matching ws-bridge release command.
+Phase 42 adds repository-owned release tooling only; production projection, LOD, selection, mutation, and authorization semantics are unchanged. The operator entrypoint is `pnpm release:native-qualify`, backed by `scripts/native-release-qualification.sh` (committed SHA256 `fb965e191cae4125be371eb118c0a9636962e44e6ca5bd7dd86399e65a94eb5e`) and a matching ws-bridge release command. The decisive current-byte qualification ran from committed HEAD `655499ec2f24f4ad9d1c0b63810ea3975bb97417`, and its machine summary binds `sourceEvidence.gateSha256` to that exact script hash.
 
 The gate is intentionally narrower and stricter than ad-hoc desktop automation:
 
@@ -319,21 +319,21 @@ Final frame timing remains genuine native evidence but is not promoted to a univ
 
 | Run | Samples | baseline median/p95 | transition median/p95/max | topology commit |
 | --- | ---: | --- | --- | ---: |
-| 1 | 120 | 16/21 ms | 16/21/24 ms | 27 ms |
-| 2 | 120 | 16/21 ms | 16/22/25 ms | 44 ms |
-| 3 | 120 | 16/21 ms | 16/23/32 ms | 30 ms |
+| 1 | 120 | 17/20 ms | 17/20/24 ms | 20 ms |
+| 2 | 120 | 17/20 ms | 17/21/23 ms | 20 ms |
+| 3 | 120 | 17/23 ms | 17/22/26 ms | 22 ms |
 
-Focused transformed-topology/preview interaction continuity is **34/34** green. Fresh `pnpm release:verify` is green: graph-elements **48/48**, app **149/149**, TypeScript/lint/build, gitinspect-core and Tauri fmt/clippy/tests/check, and whitespace gates all pass. CPU/planner/search scale totals are **17.754 ms** at 1k, **97.751 ms** at 10k, and **1259.969 ms** at 100k; the 100k fuzzy probe is **14.912 ms**. These remain CPU/planner/search measurements only and are distinct from the native GPU/requestAnimationFrame evidence. Startup entry JS is **360.48 kB minified / 107.37 kB gzip**, below the <1 MB gate; deferred `GraphScene` is **1,037.23 kB / 281.54 kB gzip** and is not counted as startup entry budget.
+Focused transformed-topology/preview interaction continuity is **34/34** green. Fresh committed-HEAD `pnpm release:verify` is green: graph-elements **48/48**, app **149/149**, TypeScript/lint/build, gitinspect-core and Tauri fmt/clippy/tests/check, and whitespace gates all pass. CPU/planner/search scale totals are **16.217 ms** at 1k, **91.410 ms** at 10k, and **1356.159 ms** at 100k; the 100k fuzzy probe is **14.557 ms**. These remain CPU/planner/search measurements only and are distinct from the native GPU/requestAnimationFrame evidence. Startup entry JS is **360.48 kB minified / 107.37 kB gzip**, below the <1 MB gate; deferred `GraphScene` is **1,037.23 kB / 281.54 kB gzip** and is not counted as startup entry budget.
 
 Browser hardware-WebGL was not used as Phase-42 acceptance authority. Its production runner still hard-codes and validates `nativeFpsClaim=false`; existing browser evidence remains supplemental only. AT-SPI was reprobed read-only: `org.a11y.Bus` exposes its private bus address, but `org.a11y.Status` is not activatable and direct registry probing fails. Qualification therefore remains `BLOCKED_ENVIRONMENT`, with `native_accessibility_tree_claim=false` and `screen_reader_claim=false`.
 
-Phase-42 evidence before the final source commit:
+Phase-42 durable evidence on the committed gate bytes:
 
-- `.ws-bridge/evidence/gitinspect-phase42-native-qualification.txt` — SHA256 `4751d80ccdd408db76dde79baa839700142c77e977540c205ce0c2ad68de8c67`
-- `.ws-bridge/evidence/gitinspect-phase42-native-qualification.json` — SHA256 `ebd8590f6e8de3f908e5511fb382d5da606a1247f0b631dc5cd86f9df3a95807`
-- `.ws-bridge/evidence/gitinspect-phase42-interaction.txt` — SHA256 `6fbcb239e3b4897eb3878b49bb24f8acef03b560e377087b081ee08c3c25256f`
+- `.ws-bridge/evidence/gitinspect-phase42-native-qualification.txt` — SHA256 `8b178dc5d0fc06255adc802ebbfb3becce100db67eae0265ab7a2036c9a01eba`
+- `.ws-bridge/evidence/gitinspect-phase42-native-qualification.json` — SHA256 `808f8e89b6157799348c937b393532c0f7e965c1c55f4e703caf1878769ec56e`
+- `.ws-bridge/evidence/gitinspect-phase42-interaction.txt` — SHA256 `0f15101a9ddc6e53a936959d2a8fc962dd1a826534d590ad8ff6cfe4a2712bcb`
 - `.ws-bridge/evidence/gitinspect-phase42-at-spi.txt` — SHA256 `6368e253a7d558f2d2dd2beded155b924b7988722af87e2a5ae09a0eecf42c9a`
-- `.ws-bridge/evidence/gitinspect-phase42-release-check.txt` — SHA256 `fe450b591e3469aef57e6f36f17b182bfce6b188232f5dfebb374d7e80387756`
+- `.ws-bridge/evidence/gitinspect-phase42-release-check.txt` — SHA256 `5022562462ddf357a32b7731e2f2513e588173738a9cdf061debc8716ecffe72`
 
 Original apply remains **NO-GO/unavailable**. No original-repository mutation command, capability, UI enablement, authorization widening, safety-case reopening, publish, deploy, tag, or release action was introduced.
 
