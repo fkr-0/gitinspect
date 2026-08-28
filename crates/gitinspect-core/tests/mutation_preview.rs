@@ -20,6 +20,8 @@ struct Fixture {
     linear: Vec<String>,
     merge_range: Vec<String>,
     rename_chain: Vec<String>,
+    split: String,
+    drop_dependency: Vec<String>,
     conflict: String,
 }
 
@@ -137,6 +139,18 @@ impl Fixture {
         git(&path, ["mv", "rename-mid.txt", "rename-new.txt"]);
         rename_chain.push(commit(&path, "rename mid to new"));
 
+        git(&path, ["checkout", "-b", "split", &base]);
+        write(&path, "split-a.txt", "split a\n");
+        write(&path, "split-b.txt", "split b\n");
+        let split = commit(&path, "deterministic split source");
+
+        git(&path, ["checkout", "-b", "drop-dependency", &base]);
+        write(&path, "dependent.txt", "introduced\n");
+        let drop_source = commit(&path, "introduce dependent file");
+        write(&path, "dependent.txt", "introduced\nrequired descendant\n");
+        let drop_child = commit(&path, "require introduced file");
+        let drop_dependency = vec![drop_source, drop_child];
+
         git(&path, ["checkout", "-b", "conflict", &base]);
         write(&path, "conflict.txt", "feature\n");
         let conflict = commit(&path, "feature conflict");
@@ -171,6 +185,8 @@ impl Fixture {
             linear,
             merge_range,
             rename_chain,
+            split,
+            drop_dependency,
             conflict,
         }
     }
@@ -275,6 +291,19 @@ fn every_supported_operation_runs_only_in_a_disposable_copy() {
             onto_oid: fixture.base.clone(),
             commit_oids: fixture.linear.clone(),
         },
+        MutationPreviewOperation::Reword {
+            branch: "linear".to_owned(),
+            commit_oid: fixture.linear[0].clone(),
+            message: "reworded first commit".to_owned(),
+        },
+        MutationPreviewOperation::Split {
+            branch: "split".to_owned(),
+            commit_oid: fixture.split.clone(),
+        },
+        MutationPreviewOperation::Drop {
+            branch: "linear".to_owned(),
+            commit_oid: fixture.linear[2].clone(),
+        },
     ];
 
     for operation in operations {
@@ -283,11 +312,165 @@ fn every_supported_operation_runs_only_in_a_disposable_copy() {
         assert!(result.success, "{kind} failed: {:?}", result.failures);
         assert!(result.failures.is_empty());
         assert!(result.preview_token.starts_with("preview:"));
-        if matches!(kind, "cherry-pick" | "rebase-reorder" | "squash" | "fixup") {
+        if matches!(
+            kind,
+            "cherry-pick" | "rebase-reorder" | "squash" | "fixup" | "reword" | "split"
+        ) {
             assert!(!result.rewritten_commits.is_empty());
             assert!(!result.hash_cascade.is_empty());
+            assert!(!result.graph_delta.commits.is_empty());
+        }
+        if kind == "drop" {
+            assert_eq!(result.dropped_commits.len(), 1);
         }
     }
+}
+
+#[test]
+fn reword_rewrites_target_and_descendants_with_bounded_message_and_graph_evidence() {
+    let fixture = Fixture::new();
+    let result = preview_one(
+        &fixture,
+        MutationPreviewOperation::Reword {
+            branch: "linear".to_owned(),
+            commit_oid: fixture.linear[0].clone(),
+            message: "replacement subject\n\nreplacement body".to_owned(),
+        },
+    );
+    assert!(result.success, "{:?}", result.failures);
+    assert_eq!(result.rewritten_commits.len(), fixture.linear.len());
+    assert_eq!(result.hash_cascade[0].reason, "reword");
+    assert!(
+        result
+            .hash_cascade
+            .iter()
+            .skip(1)
+            .all(|entry| entry.reason == "reword-descendant")
+    );
+    assert!(
+        result
+            .graph_delta
+            .commits
+            .iter()
+            .any(|commit| commit.message.starts_with("replacement subject"))
+    );
+    assert!(
+        result
+            .graph_delta
+            .refs
+            .iter()
+            .any(|reference| reference.name == "refs/heads/linear")
+    );
+
+    let manager = sandbox_manager();
+    let original = fixture.original_state();
+    for (transaction_id, message) in [
+        ("tx-empty-reword", "  \n".to_owned()),
+        ("tx-nul-reword", "replacement\0body".to_owned()),
+        ("tx-oversized-reword", "é".repeat(2_049)),
+    ] {
+        let sandbox = manager
+            .create_sandbox(&fixture.handle, &fixture.revision)
+            .unwrap();
+        let error = manager
+            .preview(
+                &sandbox.sandbox_id,
+                transaction_id,
+                &[MutationPreviewOperation::Reword {
+                    branch: "linear".to_owned(),
+                    commit_oid: fixture.linear[0].clone(),
+                    message,
+                }],
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("reword message"));
+        assert_eq!(fixture.original_state(), original);
+        manager.cleanup(&sandbox.sandbox_id).unwrap();
+    }
+}
+
+#[test]
+fn dependency_aware_drop_fails_structurally_and_original_remains_byte_identical() {
+    let fixture = Fixture::new();
+    let before = fixture.original_state();
+    let result = preview_one(
+        &fixture,
+        MutationPreviewOperation::Drop {
+            branch: "drop-dependency".to_owned(),
+            commit_oid: fixture.drop_dependency[0].clone(),
+        },
+    );
+    assert!(!result.success);
+    assert_eq!(result.failures.len(), 1);
+    assert_eq!(result.failures[0].operation_kind, "drop");
+    assert!(["conflict", "git-command-failed"].contains(&result.failures[0].code.as_str()));
+    assert_eq!(fixture.original_state(), before);
+}
+
+#[test]
+fn deterministic_split_partitions_authoritative_paths_into_two_real_commits() {
+    let fixture = Fixture::new();
+    let original = fixture.original_state();
+    let manager = sandbox_manager();
+    let sandbox = manager
+        .create_sandbox(&fixture.handle, &fixture.revision)
+        .unwrap();
+    let result = manager
+        .preview(
+            &sandbox.sandbox_id,
+            "tx-split-partition",
+            &[MutationPreviewOperation::Split {
+                branch: "split".to_owned(),
+                commit_oid: fixture.split.clone(),
+            }],
+        )
+        .unwrap();
+    assert_eq!(fixture.original_state(), original);
+    assert!(result.success, "{:?}", result.failures);
+    let split_rewrites = result
+        .rewritten_commits
+        .iter()
+        .filter(|entry| entry.old_oid == fixture.split)
+        .collect::<Vec<_>>();
+    assert_eq!(split_rewrites.len(), 2);
+    assert_ne!(split_rewrites[0].new_oid, split_rewrites[1].new_oid);
+
+    let sandbox_path = manager.root().join(&sandbox.sandbox_id);
+    let split_paths = split_rewrites
+        .iter()
+        .map(|entry| {
+            output(
+                &sandbox_path,
+                [
+                    "diff-tree",
+                    "--no-commit-id",
+                    "--name-only",
+                    "-r",
+                    entry.new_oid.as_str(),
+                ],
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(split_paths, vec!["split-a.txt", "split-b.txt"]);
+
+    assert_eq!(result.graph_delta.commits.len(), 2);
+    let new_oids = result
+        .graph_delta
+        .commits
+        .iter()
+        .map(|commit| commit.oid.as_str())
+        .collect::<Vec<_>>();
+    assert!(new_oids.contains(&split_rewrites[0].new_oid.as_str()));
+    assert!(new_oids.contains(&split_rewrites[1].new_oid.as_str()));
+    assert!(
+        result
+            .graph_delta
+            .refs
+            .iter()
+            .any(|reference| reference.name == "refs/heads/split")
+    );
+    assert!(manager.cleanup(&sandbox.sandbox_id).unwrap());
+    assert_eq!(fixture.original_state(), original);
 }
 
 #[test]
