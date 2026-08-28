@@ -233,6 +233,28 @@ Phase-39 durable evidence:
 
 Original apply remains **NO-GO/unavailable**. No original-repository mutation command, capability, UI enablement, authorization widening, safety-case reopening, publish, deploy, or release action was introduced.
 
+## Phase-40 native projection/camera-handoff closure
+
+Durable Phase-40 implementation commits are `eab58c1` (`test(app): trace native projection lifecycle`) and `144f965` (`test(app): fail closed on native accessibility focus loss`). Phase 40 remains **BLOCKED_EXTERNAL_FOCUS**: instrumentation explains the production camera/projection lifecycle, but the required repeated visible/focused native acceptance cannot be completed in the current desktop environment.
+
+The bounded production diagnostics cover `GraphViewport -> GraphScene/R3F -> ViewportCameraBridge -> ViewportProjectionBridge` without introducing a second graph model, fake projected node, or accessibility-only semantic fork. A real visible/focused native run measured the host at 1280x720, R3F/canvas convergence to 1280x720 (aspect 1.7778), selected transformed semantic ID attachment, topology-fit at the converged aspect, camera-frame publication, and then real projection publication. All four authoritative transformed commits were visible in the projection map; the selected transformed ID `commit:ffffffffffffffffffffffffffffffff00000003` exposed live/pressed/roving semantics with exactly one roving tab stop. This evidence falsifies the provisional-size/topology-fit ordering hypothesis in the observed visible run and does not prove camera restore, stale bridge state, LOD/label planning, or projection ordering defective.
+
+Earlier native focus attempts overlapped multiple Tauri runners and are retained only as diagnostic history. The decisive attempts 5/6/7 were serialized, waited for GraphScene/WebGL convergence, and each performed exactly one focus handoff to the newly-created Tauri window. Each handoff succeeded at the X11 active-window level, but the desktop later moved visibility/focus away from Tauri. WebKit then became hidden/unfocused and rAF stalled after 63/90, 28/90, and 14/90 samples respectively. The strict harness exits 101 for all three and separately rejects accessibility evidence captured after focus/visibility loss. A read-only X11 monitor observed focus returning to a Firefox Developer Edition window during the sequence. The measured remaining blocker is therefore external desktop focus/visibility interference followed by WebKit background throttling; Phase 40 does not infer deeper compositor/WebKit internals and does not relabel hidden-window projection timeout as a production camera defect.
+
+Browser hardware-WebGL remains supplemental and green for the unchanged production projected live/pressed/roving contract, with `nativeFpsClaim=false`. AT-SPI remains environment-blocked and no screen-reader/native accessibility-tree success is claimed.
+
+Final `scripts/release-check.sh --verify` at `144f965` is green: graph-elements **48/48**, app **149/149**, TypeScript/lint/build, gitinspect-core and Tauri fmt/clippy/tests/check, and whitespace gates all pass. CPU/planner/search scale totals are 28.898 ms at 1k, 109.210 ms at 10k, and 1468.358 ms at 100k; the 100k fuzzy probe is 15.441 ms. These remain CPU/planner/search metrics, not FPS evidence. Startup entry JS is **360.48 kB minified / 107.37 kB gzip**, below the <1 MB gate; deferred GraphScene is **1,037.23 kB / 281.54 kB gzip**.
+
+Phase-40 durable evidence:
+
+- `.ws-bridge/evidence/gitinspect-phase40-headed-native.txt` — SHA256 `75515b7e293f52d01a6908b59a3bd531d6718d0c98b8f185c5880b1e95d38882`
+- `.ws-bridge/evidence/gitinspect-phase40-headed-browser.txt` — SHA256 `cef419a10a55a954b76201e6fe14d391ff27a64e3c7106b4b2fa30501f6de281`
+- `.ws-bridge/evidence/gitinspect-phase40-at-spi.txt` — SHA256 `0fa5641719ed0f7c0059dd8ccba0c5defc7a7ba45d31ca32d9487eb10b74ffb3`
+- `.ws-bridge/evidence/gitinspect-phase40-release-check.txt` — SHA256 `fa7c8d8b43f4fedff4690c3b983c6dc64ffac1410df747cfc5dcfc3eb1580003`
+- `.ws-bridge/evidence/gitinspect-phase40-final.md` — SHA256 `6c83aae48d571c74f3d4acd3f2eebb0bdbc64bbd20794f19768620398267d208`
+
+Original apply remains **NO-GO/unavailable**. No original-repository mutation command, capability, UI enablement, authorization widening, publish, deploy, tag, or release action was introduced.
+
 ## Next bounded tranche
 
-Phase 40 should remain preview-only and bounded to **native projection/camera-handoff determinism only**: instrument the real visible/focused Tauri `GraphScene` camera-fit and `ViewportProjectionBridge` lifecycle, determine why authoritative transformed projected points can disappear after topology commit, and require repeated real-node success before lifting the blocker. Browser evidence must remain supplemental, AT-SPI must remain unclaimed while disabled, projection/LOD semantics must not be weakened, and original apply remains **NO-GO**.
+Phase 41 should remain preview-only and bounded to **isolated native focus authority + unchanged repeated projection acceptance**. Establish a controlled native desktop/window-manager condition in which the one permitted Tauri focus handoff is not immediately superseded by unrelated desktop activity; measure the external focus-steal source if that cannot be achieved. Then repeat the exact production real-node contract multiple times: visible/focused throughout, real authoritative transformed semantic ID, `aria-pressed=true`, exactly one roving tab stop, empty projected-node blocker, and no focus/visibility transitions. Do not add continuous refocusing, arbitrary delays, test-only overlays, projection/LOD relaxations, browser substitution, AT-SPI claims while disabled, or any original-apply capability. If the environment still cannot preserve focus, retain **BLOCKED_EXTERNAL_FOCUS** with measured evidence rather than changing production semantics.
