@@ -262,6 +262,9 @@ run_self_test() {
   if ! run_cleanup_ownership_self_test; then
     failures=$((failures + 1))
   fi
+  if ! run_cleanup_identity_guard_self_test; then
+    failures=$((failures + 1))
+  fi
 
   local no_display_summary="$runtime_dir/no-display-applicability.json"
   local no_display_output="$runtime_dir/no-display-applicability.txt"
@@ -313,6 +316,83 @@ run_self_test() {
     failures=$((failures + 1))
   else
     printf 'native_applicability_self_test=PASS lane=linux-x11-i3 result=NOT_APPLICABLE simulated_platform=Darwin exit=2\n'
+  fi
+
+  # Exercise blocker diagnostics with jq genuinely absent from PATH. The
+  # applicable Linux lane must still fail closed as PREREQUISITE_UNAVAILABLE,
+  # while an unsupported platform must remain NOT_APPLICABLE even without the
+  # optional JSON summary writer. Keep only the commands reached before the
+  # missing-jq blocker so this is a real reduced-tool process environment, not
+  # a mocked command-availability predicate.
+  make_pre_jq_path() {
+    local destination=$1 tool resolved
+    command -v ln >/dev/null 2>&1 || {
+      echo 'self_test_failure=reduced-tool fixture prerequisite unavailable tool=ln' >&2
+      return 1
+    }
+    mkdir -p "$destination"
+    for tool in bash git dirname mkdir date uname awk cargo curl grep i3-msg rm; do
+      resolved=$(command -v "$tool" 2>/dev/null || true)
+      if [[ -z "$resolved" ]]; then
+        printf 'self_test_failure=reduced-tool fixture prerequisite unavailable tool=%s\n' "$tool" >&2
+        return 1
+      fi
+      ln -s "$resolved" "$destination/$tool"
+    done
+  }
+
+  local no_jq_bin="$runtime_dir/no-jq-bin"
+  local no_jq_summary="$runtime_dir/no-jq-applicability.json"
+  local no_jq_output="$runtime_dir/no-jq-applicability.txt"
+  local no_jq_exit=0
+  if make_pre_jq_path "$no_jq_bin"; then
+    set +e
+    PATH="$no_jq_bin" bash "$repo_root/scripts/native-release-qualification.sh" \
+      --summary "$no_jq_summary" >"$no_jq_output" 2>&1
+    no_jq_exit=$?
+    set -e
+    if [[ "$no_jq_exit" != '2' ]] \
+      || ! grep -qx 'native_applicability=PREREQUISITE_UNAVAILABLE' "$no_jq_output" \
+      || ! grep -qx 'environment_blocker=required tool unavailable: jq' "$no_jq_output" \
+      || ! grep -qx 'summary_unavailable=jq is unavailable' "$no_jq_output" \
+      || [[ -s "$no_jq_summary" ]]; then
+      printf 'self_test_failure=no-jq-applicability exit=%s output=%s\n' \
+        "$no_jq_exit" "$(tr '\n' ';' <"$no_jq_output")" >&2
+      failures=$((failures + 1))
+    else
+      printf 'reduced_tool_applicability_self_test=PASS missing=jq lane=linux-x11-i3 result=PREREQUISITE_UNAVAILABLE exit=2 summary=unavailable\n'
+    fi
+
+    local no_jq_unsupported_bin="$runtime_dir/no-jq-unsupported-bin"
+    local no_jq_unsupported_summary="$runtime_dir/no-jq-unsupported.json"
+    local no_jq_unsupported_output="$runtime_dir/no-jq-unsupported.txt"
+    local no_jq_unsupported_exit=0
+    make_pre_jq_path "$no_jq_unsupported_bin" || {
+      failures=$((failures + 1))
+      no_jq_unsupported_bin=''
+    }
+    [[ -n "$no_jq_unsupported_bin" ]] || return 1
+    rm -f "$no_jq_unsupported_bin/uname"
+    printf '%s\n' '#!/bin/sh' 'printf "Darwin\\n"' >"$no_jq_unsupported_bin/uname"
+    chmod +x "$no_jq_unsupported_bin/uname"
+    set +e
+    PATH="$no_jq_unsupported_bin" bash "$repo_root/scripts/native-release-qualification.sh" \
+      --summary "$no_jq_unsupported_summary" >"$no_jq_unsupported_output" 2>&1
+    no_jq_unsupported_exit=$?
+    set -e
+    if [[ "$no_jq_unsupported_exit" != '2' ]] \
+      || ! grep -qx 'native_applicability=NOT_APPLICABLE' "$no_jq_unsupported_output" \
+      || ! grep -q "not applicable on platform 'Darwin'" "$no_jq_unsupported_output" \
+      || ! grep -qx 'summary_unavailable=jq is unavailable' "$no_jq_unsupported_output" \
+      || [[ -s "$no_jq_unsupported_summary" ]]; then
+      printf 'self_test_failure=no-jq-unsupported-applicability exit=%s output=%s\n' \
+        "$no_jq_unsupported_exit" "$(tr '\n' ';' <"$no_jq_unsupported_output")" >&2
+      failures=$((failures + 1))
+    else
+      printf 'reduced_tool_applicability_self_test=PASS missing=jq lane=linux-x11-i3 result=NOT_APPLICABLE simulated_platform=Darwin exit=2 summary=unavailable\n'
+    fi
+  else
+    failures=$((failures + 1))
   fi
 
   if ((failures != 0)); then
@@ -554,58 +634,121 @@ identity_csv_is_gone() {
   return 0
 }
 
-terminate_owned_process_tree() {
-  local root=${1:-} pgid='' pid any i
-  local -a pids=() starts=()
+identity_csv_contains_token() {
+  local csv=$1 token=$2
+  case ",$csv," in
+    *",$token,"*) return 0 ;;
+  esac
+  return 1
+}
+
+signal_matching_snapshot_identities() {
+  local snapshot_csv=$1 signal=$2 token pid start
+  local -a tokens=()
+  [[ -n "$snapshot_csv" ]] || return 0
+  IFS=',' read -r -a tokens <<<"$snapshot_csv"
+  for token in "${tokens[@]}"; do
+    pid=${token%%:*}
+    start=${token#*:}
+    if process_identity_matches "$pid" "$start"; then
+      kill -s "$signal" "$pid" 2>/dev/null || true
+    fi
+  done
+}
+
+signal_matching_snapshot_group_identities() {
+  local pgid=$1 snapshot_csv=$2 signal=$3 pid observed_pgid token start
+  [[ "$pgid" =~ ^[0-9]+$ ]] || return 0
+  while read -r pid observed_pgid; do
+    [[ -n "$pid" && "$observed_pgid" == "$pgid" ]] || continue
+    token=$(process_identity_token "$pid" 2>/dev/null || true)
+    [[ -n "$token" ]] || continue
+    identity_csv_contains_token "$snapshot_csv" "$token" || continue
+    start=${token#*:}
+    if process_identity_matches "$pid" "$start"; then
+      kill -s "$signal" "$pid" 2>/dev/null || true
+    fi
+  done < <(ps -e -o pid=,pgid=)
+}
+
+snapshot_matching_identity_count() {
+  local snapshot_csv=$1 token pid start count=0
+  local -a tokens=()
+  [[ -n "$snapshot_csv" ]] || { printf '0\n'; return 0; }
+  IFS=',' read -r -a tokens <<<"$snapshot_csv"
+  for token in "${tokens[@]}"; do
+    pid=${token%%:*}
+    start=${token#*:}
+    if process_identity_matches "$pid" "$start"; then
+      count=$((count + 1))
+    fi
+  done
+  printf '%s\n' "$count"
+}
+
+terminate_owned_process_snapshot() {
+  local root=${1:-} pgid=${2:-} snapshot_csv=${3:-}
+  local token root_start='' matching root_owned_at_entry=0
+  local -a tokens=()
   [[ "$root" =~ ^[0-9]+$ ]] || return 0
   [[ "$root" != "$$" ]] || return 1
-  [[ -r "/proc/$root/stat" ]] || return 0
-
-  mapfile -t pids < <(collect_owned_process_tree_pids "$root")
-  ((${#pids[@]} > 0)) || return 0
-  for pid in "${pids[@]}"; do
-    starts+=("$(proc_start_time "$pid" 2>/dev/null || true)")
+  [[ -n "$snapshot_csv" ]] || return 0
+  IFS=',' read -r -a tokens <<<"$snapshot_csv"
+  for token in "${tokens[@]}"; do
+    if [[ "${token%%:*}" == "$root" ]]; then
+      root_start=${token#*:}
+      break
+    fi
   done
 
-  pgid=$(ps -o pgid= -p "$root" 2>/dev/null | tr -d ' ' || true)
-  if [[ "$pgid" == "$root" ]]; then
-    kill -TERM -- "-$root" 2>/dev/null || true
+  if [[ -n "$root_start" ]] && process_identity_matches "$root" "$root_start"; then
+    root_owned_at_entry=1
+  fi
+
+  # The setsid/process-group branch never sends a raw negative-PGID signal.
+  # Instead it enumerates that owned group and signals only members whose exact
+  # pid/start-time token was present in the pre-signal snapshot. A recycled PID
+  # or late/unrelated same-group member therefore remains outside cleanup even
+  # if group membership changes between snapshot and termination.
+  if [[ "$pgid" == "$root" && -n "$root_start" ]] \
+    && process_identity_matches "$root" "$root_start"; then
+    signal_matching_snapshot_group_identities "$pgid" "$snapshot_csv" TERM
   else
-    for ((i=0; i<${#pids[@]}; i+=1)); do
-      [[ -n "${starts[i]}" ]] || continue
-      if process_identity_matches "${pids[i]}" "${starts[i]}"; then
-        kill -TERM "${pids[i]}" 2>/dev/null || true
-      fi
-    done
+    signal_matching_snapshot_identities "$snapshot_csv" TERM
   fi
 
   for _ in {1..40}; do
-    any=0
-    for ((i=0; i<${#pids[@]}; i+=1)); do
-      [[ -n "${starts[i]}" ]] || continue
-      if process_identity_matches "${pids[i]}" "${starts[i]}"; then
-        any=1
-        break
-      fi
-    done
-    ((any == 0)) && break
+    matching=$(snapshot_matching_identity_count "$snapshot_csv")
+    ((matching == 0)) && break
     sleep 0.05
   done
 
-  any=0
-  for ((i=0; i<${#pids[@]}; i+=1)); do
-    [[ -n "${starts[i]}" ]] || continue
-    if process_identity_matches "${pids[i]}" "${starts[i]}"; then
-      any=1
-      if [[ "$pgid" != "$root" ]]; then
-        kill -KILL "${pids[i]}" 2>/dev/null || true
-      fi
+  matching=$(snapshot_matching_identity_count "$snapshot_csv")
+  if ((matching != 0)); then
+    if [[ "$pgid" == "$root" && -n "$root_start" ]] \
+      && process_identity_matches "$root" "$root_start"; then
+      signal_matching_snapshot_group_identities "$pgid" "$snapshot_csv" KILL
+    else
+      signal_matching_snapshot_identities "$snapshot_csv" KILL
     fi
-  done
-  if ((any != 0)) && [[ "$pgid" == "$root" ]]; then
-    kill -KILL -- "-$root" 2>/dev/null || true
   fi
-  wait "$root" 2>/dev/null || true
+  # Reap only a root whose exact identity matched the snapshot when cleanup
+  # began. An injected stale/recycled root is intentionally left untouched and
+  # must never turn this helper into an unbounded wait on an unowned process.
+  if ((root_owned_at_entry)); then
+    wait "$root" 2>/dev/null || true
+  fi
+}
+
+terminate_owned_process_tree() {
+  local root=${1:-} pgid snapshot_csv
+  [[ "$root" =~ ^[0-9]+$ ]] || return 0
+  [[ "$root" != "$$" ]] || return 1
+  [[ -r "/proc/$root/stat" ]] || return 0
+  snapshot_csv=$(process_tree_identity_csv "$root")
+  [[ -n "$snapshot_csv" ]] || return 0
+  pgid=$(ps -o pgid= -p "$root" 2>/dev/null | tr -d ' ' || true)
+  terminate_owned_process_snapshot "$root" "$pgid" "$snapshot_csv"
 }
 
 wait_for_nonempty_file() {
@@ -665,6 +808,9 @@ run_cleanup_fixture_child() {
     printf 'native_identities=%s\n' "$(process_tree_identity_csv "$active_run_pid")"
     printf 'monitor_identities=%s\n' "$(process_tree_identity_csv "$active_monitor_pid")"
     printf 'server_identities=%s\n' "$(process_tree_identity_csv "$started_server_pid")"
+    printf 'native_group_owned=%s\n' "$([[ "$(ps -o pgid= -p "$active_run_pid" | tr -d ' ')" == "$active_run_pid" ]] && printf true || printf false)"
+    printf 'monitor_group_owned=%s\n' "$([[ "$(ps -o pgid= -p "$active_monitor_pid" | tr -d ' ')" == "$active_monitor_pid" ]] && printf true || printf false)"
+    printf 'server_group_owned=%s\n' "$([[ "$(ps -o pgid= -p "$started_server_pid" | tr -d ' ')" == "$started_server_pid" ]] && printf true || printf false)"
     printf 'server_port=%s\n' "$(cat "$server_port_file")"
   } >"$ready_tmp"
   mv "$ready_tmp" "$ready_file"
@@ -697,6 +843,7 @@ run_cleanup_ownership_case() {
   local launcher_pid child_pid child_exit=0 unrelated_port unrelated_identity unrelated_start
   local unrelated_exe unrelated_cmdline_sha runtime_owned server_port
   local native_identities monitor_identities server_identities
+  local native_group_owned monitor_group_owned server_group_owned
   mkdir -p "$case_dir"
   write_loopback_server_fixture "$unrelated_script"
 
@@ -747,6 +894,9 @@ sys.exit(process.wait())
     native_identities=$(field_value "$ready_file" native_identities)
     monitor_identities=$(field_value "$ready_file" monitor_identities)
     server_identities=$(field_value "$ready_file" server_identities)
+    native_group_owned=$(field_value "$ready_file" native_group_owned)
+    monitor_group_owned=$(field_value "$ready_file" monitor_group_owned)
+    server_group_owned=$(field_value "$ready_file" server_group_owned)
     server_port=$(field_value "$ready_file" server_port)
     printf '%s\n' "$signal" >"$signal_file"
     set +e
@@ -775,6 +925,11 @@ sys.exit(process.wait())
       echo "cleanup_self_test_failure=$signal server descendant residue=$server_identities" >&2
       failures=$((failures + 1))
     }
+    if [[ "$native_group_owned" != 'false' || "$monitor_group_owned" != 'false' || "$server_group_owned" != 'true' ]]; then
+      printf 'cleanup_self_test_failure=%s branch-fidelity native_group_owned=%s monitor_group_owned=%s server_group_owned=%s\n' \
+        "$signal" "$native_group_owned" "$monitor_group_owned" "$server_group_owned" >&2
+      failures=$((failures + 1))
+    fi
     if ss -ltnp "( sport = :$server_port )" 2>/dev/null | grep -q 'pid='; then
       echo "cleanup_self_test_failure=$signal gate-owned server listener survived port=$server_port" >&2
       failures=$((failures + 1))
@@ -787,7 +942,7 @@ sys.exit(process.wait())
       failures=$((failures + 1))
     fi
     if ((failures == 0)); then
-      printf 'cleanup_signal=%s cleanup_exit=%s child_pid=%s native_tree_gone=true monitor_tree_gone=true server_tree_gone=true runtime_removed=true unrelated_listener_preserved=true\n' \
+      printf 'cleanup_signal=%s cleanup_exit=%s child_pid=%s native_tree_gone=true monitor_tree_gone=true server_tree_gone=true runtime_removed=true unrelated_listener_preserved=true native_branch=exact-pid monitor_branch=exact-pid server_branch=bounded-process-group\n' \
         "$signal" "$child_exit" "$child_pid"
     fi
   fi
@@ -814,6 +969,120 @@ run_cleanup_ownership_self_test() {
     return 1
   fi
   echo 'NATIVE_RELEASE_QUALIFICATION_CLEANUP_SELF_TEST=PASS'
+}
+
+run_cleanup_identity_guard_self_test() {
+  local failures=0 stale_pid stale_start stale_pgid stale_snapshot
+  local case_dir="$runtime_dir/cleanup-identity-adversarial"
+  local nongroup_trigger="$case_dir/nongroup-trigger"
+  local nongroup_child_file="$case_dir/nongroup-child"
+  local group_trigger="$case_dir/group-trigger"
+  local group_child_file="$case_dir/group-child"
+  local root child root_pgid root_snapshot child_start
+  mkdir -p "$case_dir"
+
+  # Deterministic stale-identity injection: give the production snapshot helper
+  # the real PID with a deliberately non-matching start time. The still-live
+  # gate-owned process proves no TERM/KILL was sent to the mismatched identity.
+  sleep 300 &
+  stale_pid=$!
+  stale_start=$(proc_start_time "$stale_pid")
+  stale_pgid=$(ps -o pgid= -p "$stale_pid" | tr -d ' ')
+  stale_snapshot="$stale_pid:$((stale_start + 1))"
+  terminate_owned_process_snapshot "$stale_pid" "$stale_pgid" "$stale_snapshot"
+  if ! process_identity_matches "$stale_pid" "$stale_start"; then
+    echo 'cleanup_identity_self_test_failure=stale identity was signalled' >&2
+    failures=$((failures + 1))
+  else
+    printf 'cleanup_identity_guard=PASS stale_pid_start_mismatch_preserved=true\n'
+  fi
+  terminate_owned_process_tree "$stale_pid"
+
+  # Snapshot a non-setsid root before it creates a descendant. The late child
+  # must not be swept into exact-PID cleanup merely because it later becomes a
+  # descendant of the owned root.
+  python3 -c '
+import os
+import subprocess
+import sys
+import time
+
+trigger, child_file = sys.argv[1:3]
+while not os.path.exists(trigger):
+    time.sleep(0.01)
+child = subprocess.Popen(["sleep", "300"])
+with open(child_file, "w", encoding="utf-8") as handle:
+    handle.write(str(child.pid))
+child.wait()
+' "$nongroup_trigger" "$nongroup_child_file" &
+  root=$!
+  root_pgid=$(ps -o pgid= -p "$root" | tr -d ' ')
+  root_snapshot=$(process_tree_identity_csv "$root")
+  : >"$nongroup_trigger"
+  if wait_for_nonempty_file "$nongroup_child_file"; then
+    child=$(cat "$nongroup_child_file")
+    child_start=$(proc_start_time "$child")
+    terminate_owned_process_snapshot "$root" "$root_pgid" "$root_snapshot"
+    if ! process_identity_matches "$child" "$child_start"; then
+      echo 'cleanup_identity_self_test_failure=non-group descendant churn was broadened into snapshot cleanup' >&2
+      failures=$((failures + 1))
+    else
+      printf 'cleanup_scope_guard=PASS branch=exact-pid late_descendant_preserved=true\n'
+    fi
+    terminate_owned_process_tree "$child"
+  else
+    echo 'cleanup_identity_self_test_failure=non-group churn child did not start' >&2
+    failures=$((failures + 1))
+    terminate_owned_process_tree "$root"
+  fi
+
+  # Repeat with a setsid root. The late child inherits the owned PGID but is
+  # absent from the snapshot; the process-group branch must select only exact
+  # snapshot identities and leave that late same-group sibling untouched.
+  setsid python3 -c '
+import os
+import subprocess
+import sys
+import time
+
+trigger, child_file = sys.argv[1:3]
+while not os.path.exists(trigger):
+    time.sleep(0.01)
+child = subprocess.Popen(["sleep", "300"])
+with open(child_file, "w", encoding="utf-8") as handle:
+    handle.write(str(child.pid))
+child.wait()
+' "$group_trigger" "$group_child_file" &
+  root=$!
+  root_pgid=$(ps -o pgid= -p "$root" | tr -d ' ')
+  root_snapshot=$(process_tree_identity_csv "$root")
+  : >"$group_trigger"
+  if wait_for_nonempty_file "$group_child_file"; then
+    child=$(cat "$group_child_file")
+    child_start=$(proc_start_time "$child")
+    if [[ "$root_pgid" != "$root" || "$(ps -o pgid= -p "$child" | tr -d ' ')" != "$root" ]]; then
+      echo 'cleanup_identity_self_test_failure=group churn fixture did not share owned process group' >&2
+      failures=$((failures + 1))
+    fi
+    terminate_owned_process_snapshot "$root" "$root_pgid" "$root_snapshot"
+    if ! process_identity_matches "$child" "$child_start"; then
+      echo 'cleanup_identity_self_test_failure=late same-group sibling was signalled by broad process-group cleanup' >&2
+      failures=$((failures + 1))
+    else
+      printf 'cleanup_scope_guard=PASS branch=bounded-process-group late_same_group_sibling_preserved=true selection=exact-snapshot-identities\n'
+    fi
+    terminate_owned_process_tree "$child"
+  else
+    echo 'cleanup_identity_self_test_failure=group churn child did not start' >&2
+    failures=$((failures + 1))
+    terminate_owned_process_tree "$root"
+  fi
+
+  if ((failures != 0)); then
+    printf 'NATIVE_RELEASE_QUALIFICATION_IDENTITY_SELF_TEST=FAIL failures=%d\n' "$failures" >&2
+    return 1
+  fi
+  echo 'NATIVE_RELEASE_QUALIFICATION_IDENTITY_SELF_TEST=PASS'
 }
 
 cleanup() {
@@ -901,7 +1170,7 @@ if [[ "$(native_lane_platform_result "$platform_name")" != 'APPLICABLE' ]]; then
 fi
 
 for tool in awk bash cargo curl date grep i3-msg jq pnpm ps readlink sed setsid sha256sum sort ss tr uname wmctrl xprop; do
-  command -v "$tool" >/dev/null || write_environment_blocker "required tool unavailable: $tool"
+  command -v "$tool" >/dev/null || write_environment_blocker "required tool unavailable: $tool" 'PREREQUISITE_UNAVAILABLE'
 done
 
 [[ -n "${DISPLAY:-}" ]] || write_environment_blocker 'DISPLAY is unset; X11 native qualification is unavailable' 'PREREQUISITE_UNAVAILABLE'
