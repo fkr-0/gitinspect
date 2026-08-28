@@ -1,0 +1,115 @@
+name: Experimental WebAssembly Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/pages.yml"
+      - "web/pages/**"
+      - "docs/**"
+      - "apps/gitinspect/**"
+      - "crates/gitinspect-wasm/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Setup Rust/WASM target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install matching wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.127 --locked
+
+      - name: Test WASM boundary
+        run: cargo test --manifest-path crates/gitinspect-wasm/Cargo.toml
+
+      - name: Build Rust WebAssembly module
+        env:
+          CARGO_TARGET_DIR: target/wasm
+        run: |
+          set -euo pipefail
+          cargo build \
+            --manifest-path crates/gitinspect-wasm/Cargo.toml \
+            --release \
+            --target wasm32-unknown-unknown
+          mkdir -p apps/gitinspect/public/wasm
+          wasm-bindgen \
+            target/wasm/wasm32-unknown-unknown/release/gitinspect_wasm.wasm \
+            --out-dir apps/gitinspect/public/wasm \
+            --target web \
+            --no-typescript
+
+      - name: Type-check browser application
+        run: pnpm --filter @gitinspect/app typecheck
+
+      - name: Build experimental WASM application
+        run: pnpm --filter @gitinspect/app exec vite build --config vite.wasm.config.ts
+
+      - name: Assemble documentation-first Pages artifact
+        run: |
+          set -euo pipefail
+          rm -rf .pages
+          mkdir -p .pages/wasm .pages/docs
+          cp -R web/pages/. .pages/
+          cp -R apps/gitinspect/dist-wasm/. .pages/wasm/
+          mv .pages/wasm/wasm.html .pages/wasm/index.html
+          cp README.md .pages/docs/README.md
+          cp docs/*.md .pages/docs/
+          touch .pages/.nojekyll
+          test -s .pages/index.html
+          test -s .pages/wasm/index.html
+          test -s .pages/wasm/wasm/gitinspect_wasm.js
+          test -s .pages/wasm/wasm/gitinspect_wasm_bg.wasm
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: .pages
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

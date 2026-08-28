@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#080b0f" />
+    <meta
+      name="description"
+      content="GitInspect documentation and experimental Rust/WebAssembly browser edition."
+    />
+    <title>GitInspect · spatial Git documentation</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <nav class="nav">
+        <a class="brand" href="./">gitinspect</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#wasm">WebAssembly</a>
+        <a href="#safety">Safety</a>
+      </nav>
+      <div class="hero__copy">
+        <p class="eyebrow">GPU-driven spatial Git studio · experimental browser track</p>
+        <h1>Understand the repository before entering the world.</h1>
+        <p class="lede">
+          GitInspect turns Git history into a topology-first 3D Railfield: ancestry is infrastructure,
+          commits are stations, branches are lanes, merges are junctions, and refs stay attached to the
+          commits they describe.
+        </p>
+        <div class="actions">
+          <a class="button button--primary" href="./wasm/">Launch WebAssembly experiment</a>
+          <a class="button" href="#wasm">Read the WASM boundary first</a>
+        </div>
+      </div>
+      <div class="rail" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    </header>
+
+    <main>
+      <section id="architecture" class="section grid-two">
+        <div>
+          <p class="eyebrow">Architecture</p>
+          <h2>Rendering and repository authority stay separate.</h2>
+        </div>
+        <div class="prose">
+          <p>
+            React, Three.js and the generic graph-elements package own the visual world, interaction,
+            topology projection, labels, camera and large-history LOD. Native Rust owns repository access,
+            parsing, watching, diff extraction and the guarded mutation model.
+          </p>
+          <p>
+            The browser experiment preserves this line instead of pretending a desktop filesystem backend
+            is available inside WebAssembly.
+          </p>
+        </div>
+      </section>
+
+      <section class="section cards">
+        <article><span>01</span><h3>Topology first</h3><p>Chronology runs oldest→newest. Stable branch lanes expose divergence and convergence without identity-derived scatter.</p></article>
+        <article><span>02</span><h3>Structural focus</h3><p>Selection retains parents, children, merge ingress, attached refs and first-parent context instead of isolating one glowing point.</p></article>
+        <article><span>03</span><h3>Scale without erasure</h3><p>Linear history can aggregate while HEAD, branch tips, merges, tags and topology discontinuities remain hard structural anchors.</p></article>
+      </section>
+
+      <section id="wasm" class="section wasm-panel">
+        <div>
+          <p class="eyebrow">WebAssembly status</p>
+          <h2>Real Rust/WASM execution. Deliberately limited repository authority.</h2>
+        </div>
+        <div class="capabilities">
+          <div><b>Rust/WASM runtime</b><strong>enabled</strong></div>
+          <div><b>3D browser visualization</b><strong>enabled</strong></div>
+          <div><b>Repository source</b><strong>synthetic demo</strong></div>
+          <div><b>Native Git parsing</b><strong class="muted">not yet</strong></div>
+          <div><b>Filesystem watcher</b><strong class="muted">not available</strong></div>
+          <div><b>Mutation authority</b><strong class="muted">disabled</strong></div>
+        </div>
+        <p class="prose wide">
+          The experimental entry must successfully initialize a versioned Rust/WebAssembly module before
+          the GitInspect UI appears. The module publishes a deterministic runtime fingerprint and an explicit
+          fail-closed capability record. If WASM fails to load, the page reports that failure instead of
+          silently calling the ordinary JavaScript demo a WebAssembly build.
+        </p>
+        <a class="button button--primary" href="./wasm/">Enter the experimental WASM edition →</a>
+      </section>
+
+      <section id="safety" class="section grid-two">
+        <div><p class="eyebrow">Safety model</p><h2>Browser availability does not widen mutation authority.</h2></div>
+        <div class="prose">
+          <p>Inspection is read-only by default. Mutation workflows remain preview-first and original-repository apply remains outside the browser experiment.</p>
+          <p>The WASM capability contract explicitly reports <code>mutationAuthority: false</code> and <code>nativeGit: false</code>.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>GitInspect experimental documentation site</span>
+      <span>Desktop authority · browser exploration</span>
+    </footer>
+  </body>
+</html>
