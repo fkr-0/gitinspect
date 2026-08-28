@@ -21,6 +21,14 @@ requested_workspace=${GITINSPECT_NATIVE_WORKSPACE:-}
 summary_path=''
 self_test=0
 
+native_lane_platform_result() {
+  if [[ ${1:-} == 'Linux' ]]; then
+    printf '%s\n' 'APPLICABLE'
+  else
+    printf '%s\n' 'NOT_APPLICABLE'
+  fi
+}
+
 classify_headed_runner() {
   (($# >= 2)) || return 1
   local real_executable=$1
@@ -238,6 +246,75 @@ run_self_test() {
     failures=$((failures + 1))
   fi
 
+  [[ "$(native_lane_platform_result Linux)" == 'APPLICABLE' ]] || {
+    echo 'self_test_failure=linux native lane applicability misclassified' >&2
+    failures=$((failures + 1))
+  }
+  [[ "$(native_lane_platform_result Darwin)" == 'NOT_APPLICABLE' ]] || {
+    echo 'self_test_failure=darwin native lane applicability misclassified' >&2
+    failures=$((failures + 1))
+  }
+  [[ "$(native_lane_platform_result Windows_NT)" == 'NOT_APPLICABLE' ]] || {
+    echo 'self_test_failure=windows native lane applicability misclassified' >&2
+    failures=$((failures + 1))
+  }
+
+  if ! run_cleanup_ownership_self_test; then
+    failures=$((failures + 1))
+  fi
+
+  local no_display_summary="$runtime_dir/no-display-applicability.json"
+  local no_display_output="$runtime_dir/no-display-applicability.txt"
+  local no_display_exit=0
+  set +e
+  env -u DISPLAY -u I3SOCK bash "$repo_root/scripts/native-release-qualification.sh" \
+    --summary "$no_display_summary" >"$no_display_output" 2>&1
+  no_display_exit=$?
+  set -e
+  if [[ "$no_display_exit" != '2' ]] \
+    || ! jq -e '
+      .status == "BLOCKED_ENVIRONMENT"
+      and .nativeApplicability.lane == "linux-x11-i3"
+      and .nativeApplicability.result == "PREREQUISITE_UNAVAILABLE"
+      and (.environmentBlocker | contains("DISPLAY is unset"))
+      and (.runs | length == 0)
+    ' "$no_display_summary" >/dev/null 2>&1; then
+    printf 'self_test_failure=no-display-applicability exit=%s output=%s\n' \
+      "$no_display_exit" "$(tr '\n' ';' <"$no_display_output")" >&2
+    failures=$((failures + 1))
+  else
+    printf 'native_applicability_self_test=PASS lane=linux-x11-i3 result=PREREQUISITE_UNAVAILABLE exit=2\n'
+  fi
+
+  local unsupported_bin="$runtime_dir/unsupported-platform-bin"
+  local unsupported_summary="$runtime_dir/unsupported-platform-applicability.json"
+  local unsupported_output="$runtime_dir/unsupported-platform-applicability.txt"
+  local unsupported_exit=0
+  mkdir -p "$unsupported_bin"
+  printf '%s\n' '#!/bin/sh' 'printf "Darwin\\n"' >"$unsupported_bin/uname"
+  chmod +x "$unsupported_bin/uname"
+  set +e
+  PATH="$unsupported_bin:$PATH" bash "$repo_root/scripts/native-release-qualification.sh" \
+    --summary "$unsupported_summary" >"$unsupported_output" 2>&1
+  unsupported_exit=$?
+  set -e
+  if [[ "$unsupported_exit" != '2' ]] \
+    || ! grep -qx 'native_applicability=NOT_APPLICABLE' "$unsupported_output" \
+    || ! jq -e '
+      .status == "BLOCKED_ENVIRONMENT"
+      and .nativeApplicability.lane == "linux-x11-i3"
+      and .nativeApplicability.result == "NOT_APPLICABLE"
+      and (.environmentBlocker | contains("not applicable on platform"))
+      and (.environmentBlocker | contains("Darwin"))
+      and (.runs | length == 0)
+    ' "$unsupported_summary" >/dev/null 2>&1; then
+    printf 'self_test_failure=unsupported-platform-applicability exit=%s output=%s\n' \
+      "$unsupported_exit" "$(tr '\n' ';' <"$unsupported_output")" >&2
+    failures=$((failures + 1))
+  else
+    printf 'native_applicability_self_test=PASS lane=linux-x11-i3 result=NOT_APPLICABLE simulated_platform=Darwin exit=2\n'
+  fi
+
   if ((failures != 0)); then
     printf 'NATIVE_RELEASE_QUALIFICATION_SELF_TEST=FAIL failures=%d\n' "$failures" >&2
     return 1
@@ -254,7 +331,7 @@ Options:
   --workspace NAME  Use NAME only if it does not already exist in i3.
                     Without this flag, the gate discovers an absent numeric workspace.
   --summary PATH    Write machine-readable JSON provenance to PATH.
-  --self-test       Run pure provenance/classification regressions only.
+  --self-test       Run pure provenance, cleanup-ownership, and applicability regressions.
   -h, --help        Show this help.
 
 The gate is intentionally fail-closed. It requires X11+i3, an absent workspace that
@@ -297,17 +374,6 @@ while (($# > 0)); do
   shift
 done
 
-if ((self_test)); then
-  run_self_test
-  exit $?
-fi
-
-[[ "$runs" =~ ^[0-9]+$ ]] || { echo '--runs must be an integer' >&2; exit 64; }
-((runs >= REQUIRED_RUNS)) || {
-  echo "--runs may not weaken native acceptance below $REQUIRED_RUNS" >&2
-  exit 64
-}
-
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
@@ -329,6 +395,7 @@ started_server_pid=''
 active_run_pid=''
 active_monitor_pid=''
 active_alive_file=''
+self_test_listener_pid=''
 cleanup_complete=0
 
 now_iso() {
@@ -431,32 +498,343 @@ field_value() {
   awk -v key="$key" 'index($0, key "=") == 1 {print substr($0, length(key) + 2); exit}' "$file"
 }
 
+proc_start_time() {
+  local pid=$1 stat tail
+  [[ "$pid" =~ ^[0-9]+$ ]] && [[ -r "/proc/$pid/stat" ]] || return 1
+  stat=$(<"/proc/$pid/stat")
+  tail=${stat#*) }
+  awk '{print $20}' <<<"$tail"
+}
+
+process_identity_token() {
+  local pid=$1 start
+  start=$(proc_start_time "$pid" 2>/dev/null || true)
+  [[ -n "$start" ]] || return 1
+  printf '%s:%s\n' "$pid" "$start"
+}
+
+process_identity_matches() {
+  local pid=$1 expected_start=$2 actual_start
+  actual_start=$(proc_start_time "$pid" 2>/dev/null || true)
+  [[ -n "$actual_start" && "$actual_start" == "$expected_start" ]]
+}
+
+collect_owned_process_tree_pids() {
+  local root=$1 child
+  while read -r child; do
+    [[ -n "$child" ]] || continue
+    collect_owned_process_tree_pids "$child"
+  done < <(ps -e -o pid=,ppid= | awk -v parent="$root" '$2 == parent {print $1}')
+  printf '%s\n' "$root"
+}
+
+process_tree_identity_csv() {
+  local root=$1 pid token csv=''
+  while read -r pid; do
+    token=$(process_identity_token "$pid" 2>/dev/null || true)
+    [[ -n "$token" ]] || continue
+    [[ -z "$csv" ]] || csv+=','
+    csv+="$token"
+  done < <(collect_owned_process_tree_pids "$root")
+  printf '%s\n' "$csv"
+}
+
+identity_csv_is_gone() {
+  local csv=$1 token pid start
+  local -a tokens=()
+  [[ -n "$csv" ]] || return 1
+  IFS=',' read -r -a tokens <<<"$csv"
+  for token in "${tokens[@]}"; do
+    pid=${token%%:*}
+    start=${token#*:}
+    if process_identity_matches "$pid" "$start"; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+terminate_owned_process_tree() {
+  local root=${1:-} pgid='' pid any i
+  local -a pids=() starts=()
+  [[ "$root" =~ ^[0-9]+$ ]] || return 0
+  [[ "$root" != "$$" ]] || return 1
+  [[ -r "/proc/$root/stat" ]] || return 0
+
+  mapfile -t pids < <(collect_owned_process_tree_pids "$root")
+  ((${#pids[@]} > 0)) || return 0
+  for pid in "${pids[@]}"; do
+    starts+=("$(proc_start_time "$pid" 2>/dev/null || true)")
+  done
+
+  pgid=$(ps -o pgid= -p "$root" 2>/dev/null | tr -d ' ' || true)
+  if [[ "$pgid" == "$root" ]]; then
+    kill -TERM -- "-$root" 2>/dev/null || true
+  else
+    for ((i=0; i<${#pids[@]}; i+=1)); do
+      [[ -n "${starts[i]}" ]] || continue
+      if process_identity_matches "${pids[i]}" "${starts[i]}"; then
+        kill -TERM "${pids[i]}" 2>/dev/null || true
+      fi
+    done
+  fi
+
+  for _ in {1..40}; do
+    any=0
+    for ((i=0; i<${#pids[@]}; i+=1)); do
+      [[ -n "${starts[i]}" ]] || continue
+      if process_identity_matches "${pids[i]}" "${starts[i]}"; then
+        any=1
+        break
+      fi
+    done
+    ((any == 0)) && break
+    sleep 0.05
+  done
+
+  any=0
+  for ((i=0; i<${#pids[@]}; i+=1)); do
+    [[ -n "${starts[i]}" ]] || continue
+    if process_identity_matches "${pids[i]}" "${starts[i]}"; then
+      any=1
+      if [[ "$pgid" != "$root" ]]; then
+        kill -KILL "${pids[i]}" 2>/dev/null || true
+      fi
+    fi
+  done
+  if ((any != 0)) && [[ "$pgid" == "$root" ]]; then
+    kill -KILL -- "-$root" 2>/dev/null || true
+  fi
+  wait "$root" 2>/dev/null || true
+}
+
+wait_for_nonempty_file() {
+  local file=$1
+  for _ in {1..100}; do
+    [[ -s "$file" ]] && return 0
+    sleep 0.05
+  done
+  return 1
+}
+
+write_loopback_server_fixture() {
+  local destination=$1
+  cat >"$destination" <<'NODE'
+const fs = require('node:fs');
+const http = require('node:http');
+
+const [portFile, body] = process.argv.slice(2);
+const server = http.createServer((_request, response) => {
+  response.writeHead(200, { 'content-type': 'text/plain' });
+  response.end(body);
+});
+server.listen(0, '127.0.0.1', () => {
+  fs.writeFileSync(portFile, String(server.address().port));
+});
+NODE
+}
+
+run_cleanup_fixture_child() {
+  local ready_file=${GITINSPECT_NATIVE_CLEANUP_SELF_TEST_READY_FILE:-}
+  local signal_file=${GITINSPECT_NATIVE_CLEANUP_SELF_TEST_SIGNAL_FILE:-}
+  local server_script="$runtime_dir/loopback-server.js"
+  local server_port_file="$runtime_dir/server-port.txt"
+  local requested_signal=''
+  [[ -n "$ready_file" && -n "$signal_file" ]] || return 64
+  command -v node >/dev/null 2>&1 || return 69
+
+  write_loopback_server_fixture "$server_script"
+  active_alive_file="$runtime_dir/monitor-alive"
+  touch "$active_alive_file"
+
+  setsid bash -c 'sleep 300 & wait "$!"' &
+  active_run_pid=$!
+  setsid bash -c 'sleep 300 & wait "$!"' &
+  active_monitor_pid=$!
+  # The positional parameters are intentionally expanded by the child shell.
+  # shellcheck disable=SC2016
+  setsid bash -c 'node "$1" "$2" gate-owned-server & wait "$!"' _ \
+    "$server_script" "$server_port_file" &
+  started_server_pid=$!
+
+  wait_for_nonempty_file "$server_port_file" || return 70
+  sleep 0.05
+  local ready_tmp="${ready_file}.tmp.$$"
+  {
+    printf 'runtime_dir=%s\n' "$runtime_dir"
+    printf 'native_identities=%s\n' "$(process_tree_identity_csv "$active_run_pid")"
+    printf 'monitor_identities=%s\n' "$(process_tree_identity_csv "$active_monitor_pid")"
+    printf 'server_identities=%s\n' "$(process_tree_identity_csv "$started_server_pid")"
+    printf 'server_port=%s\n' "$(cat "$server_port_file")"
+  } >"$ready_tmp"
+  mv "$ready_tmp" "$ready_file"
+
+  while [[ ! -s "$signal_file" ]]; do
+    sleep 0.02
+  done
+  requested_signal=$(cat "$signal_file")
+  case "$requested_signal" in
+    INT|TERM)
+      kill -s "$requested_signal" "$$"
+      ;;
+    *)
+      return 64
+      ;;
+  esac
+  sleep 1
+  return 70
+}
+
+run_cleanup_ownership_case() {
+  local signal=$1 expected_exit=$2 failures=0
+  local case_dir="$runtime_dir/cleanup-self-test-${signal,,}"
+  local unrelated_script="$case_dir/unrelated-server.js"
+  local unrelated_port_file="$case_dir/unrelated-port.txt"
+  local ready_file="$case_dir/child-ready.txt"
+  local signal_file="$case_dir/child-signal.txt"
+  local child_pid_file="$case_dir/child-pid.txt"
+  local child_log="$case_dir/child.log"
+  local launcher_pid child_pid child_exit=0 unrelated_port unrelated_identity unrelated_start
+  local unrelated_exe unrelated_cmdline_sha runtime_owned server_port
+  local native_identities monitor_identities server_identities
+  mkdir -p "$case_dir"
+  write_loopback_server_fixture "$unrelated_script"
+
+  setsid node "$unrelated_script" "$unrelated_port_file" unrelated-preexisting-listener &
+  self_test_listener_pid=$!
+  wait_for_nonempty_file "$unrelated_port_file" || {
+    echo "cleanup_self_test_failure=$signal unrelated listener did not bind" >&2
+    return 1
+  }
+  unrelated_port=$(cat "$unrelated_port_file")
+  unrelated_identity=$(process_identity_token "$self_test_listener_pid")
+  unrelated_start=${unrelated_identity#*:}
+  unrelated_exe=$(readlink -f "/proc/$self_test_listener_pid/exe")
+  unrelated_cmdline_sha=$(sha256sum "/proc/$self_test_listener_pid/cmdline" | awk '{print $1}')
+  [[ "$(curl -fsS --max-time 2 "http://127.0.0.1:$unrelated_port/")" == 'unrelated-preexisting-listener' ]] || {
+    echo "cleanup_self_test_failure=$signal unrelated listener not reachable before child" >&2
+    failures=$((failures + 1))
+  }
+
+  GITINSPECT_NATIVE_CLEANUP_SELF_TEST_CHILD=1 \
+    GITINSPECT_NATIVE_CLEANUP_SELF_TEST_READY_FILE="$ready_file" \
+    GITINSPECT_NATIVE_CLEANUP_SELF_TEST_SIGNAL_FILE="$signal_file" \
+    python3 -c '
+import signal
+import subprocess
+import sys
+
+pid_file, script = sys.argv[1:3]
+
+def reset_signals():
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+
+process = subprocess.Popen(["bash", script], preexec_fn=reset_signals)
+with open(pid_file, "w", encoding="utf-8") as handle:
+    handle.write(str(process.pid))
+sys.exit(process.wait())
+' "$child_pid_file" "$repo_root/scripts/native-release-qualification.sh" >"$child_log" 2>&1 &
+  launcher_pid=$!
+
+  if ! wait_for_nonempty_file "$ready_file" || ! wait_for_nonempty_file "$child_pid_file"; then
+    echo "cleanup_self_test_failure=$signal child did not become ready" >&2
+    terminate_owned_process_tree "$launcher_pid"
+    failures=$((failures + 1))
+  else
+    child_pid=$(cat "$child_pid_file")
+    runtime_owned=$(field_value "$ready_file" runtime_dir)
+    native_identities=$(field_value "$ready_file" native_identities)
+    monitor_identities=$(field_value "$ready_file" monitor_identities)
+    server_identities=$(field_value "$ready_file" server_identities)
+    server_port=$(field_value "$ready_file" server_port)
+    printf '%s\n' "$signal" >"$signal_file"
+    set +e
+    wait "$launcher_pid"
+    child_exit=$?
+    set -e
+
+    [[ "$child_exit" == "$expected_exit" ]] || {
+      printf 'cleanup_self_test_failure=%s expected_exit=%s actual_exit=%s child_pid=%s log=%s\n' \
+        "$signal" "$expected_exit" "$child_exit" "$child_pid" "$(tr '\n' ';' <"$child_log")" >&2
+      failures=$((failures + 1))
+    }
+    [[ ! -e "$runtime_owned" ]] || {
+      echo "cleanup_self_test_failure=$signal runtime residue=$runtime_owned" >&2
+      failures=$((failures + 1))
+    }
+    identity_csv_is_gone "$native_identities" || {
+      echo "cleanup_self_test_failure=$signal native descendant residue=$native_identities" >&2
+      failures=$((failures + 1))
+    }
+    identity_csv_is_gone "$monitor_identities" || {
+      echo "cleanup_self_test_failure=$signal monitor descendant residue=$monitor_identities" >&2
+      failures=$((failures + 1))
+    }
+    identity_csv_is_gone "$server_identities" || {
+      echo "cleanup_self_test_failure=$signal server descendant residue=$server_identities" >&2
+      failures=$((failures + 1))
+    }
+    if ss -ltnp "( sport = :$server_port )" 2>/dev/null | grep -q 'pid='; then
+      echo "cleanup_self_test_failure=$signal gate-owned server listener survived port=$server_port" >&2
+      failures=$((failures + 1))
+    fi
+    if ! process_identity_matches "$self_test_listener_pid" "$unrelated_start" \
+      || [[ "$(readlink -f "/proc/$self_test_listener_pid/exe" 2>/dev/null || true)" != "$unrelated_exe" ]] \
+      || [[ "$(sha256sum "/proc/$self_test_listener_pid/cmdline" 2>/dev/null | awk '{print $1}')" != "$unrelated_cmdline_sha" ]] \
+      || [[ "$(curl -fsS --max-time 2 "http://127.0.0.1:$unrelated_port/" 2>/dev/null || true)" != 'unrelated-preexisting-listener' ]]; then
+      echo "cleanup_self_test_failure=$signal unrelated listener changed or disappeared" >&2
+      failures=$((failures + 1))
+    fi
+    if ((failures == 0)); then
+      printf 'cleanup_signal=%s cleanup_exit=%s child_pid=%s native_tree_gone=true monitor_tree_gone=true server_tree_gone=true runtime_removed=true unrelated_listener_preserved=true\n' \
+        "$signal" "$child_exit" "$child_pid"
+    fi
+  fi
+
+  terminate_owned_process_tree "$self_test_listener_pid"
+  self_test_listener_pid=''
+  return "$failures"
+}
+
+run_cleanup_ownership_self_test() {
+  local failures=0
+  command -v node >/dev/null 2>&1 || {
+    echo 'cleanup_self_test_failure=node unavailable' >&2
+    return 1
+  }
+  command -v python3 >/dev/null 2>&1 || {
+    echo 'cleanup_self_test_failure=python3 unavailable' >&2
+    return 1
+  }
+  run_cleanup_ownership_case TERM 143 || failures=$((failures + 1))
+  run_cleanup_ownership_case INT 130 || failures=$((failures + 1))
+  if ((failures != 0)); then
+    printf 'NATIVE_RELEASE_QUALIFICATION_CLEANUP_SELF_TEST=FAIL failures=%d\n' "$failures" >&2
+    return 1
+  fi
+  echo 'NATIVE_RELEASE_QUALIFICATION_CLEANUP_SELF_TEST=PASS'
+}
+
 cleanup() {
   if ((cleanup_complete)); then
     return
   fi
   cleanup_complete=1
 
-  if [[ -n "$active_run_pid" ]]; then
-    kill "$active_run_pid" 2>/dev/null || true
-    wait "$active_run_pid" 2>/dev/null || true
-  fi
+  terminate_owned_process_tree "$active_run_pid"
   if [[ -n "$active_alive_file" ]]; then
     rm -f "$active_alive_file"
   fi
-  if [[ -n "$active_monitor_pid" ]]; then
-    wait "$active_monitor_pid" 2>/dev/null || true
-  fi
-
-  if [[ -n "$started_server_pid" ]]; then
-    kill -TERM -- "-$started_server_pid" 2>/dev/null || true
-    wait "$started_server_pid" 2>/dev/null || true
-  fi
+  terminate_owned_process_tree "$active_monitor_pid"
+  terminate_owned_process_tree "$started_server_pid"
 
   if ((switched_workspace)) && [[ -n "$original_workspace" ]]; then
     i3-msg workspace "$original_workspace" >/dev/null 2>&1 || true
   fi
 
+  terminate_owned_process_tree "$self_test_listener_pid"
+  self_test_listener_pid=''
   rm -rf "$runtime_dir"
 }
 
@@ -470,30 +848,65 @@ trap on_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+if [[ ${GITINSPECT_NATIVE_CLEANUP_SELF_TEST_CHILD:-0} == '1' ]]; then
+  run_cleanup_fixture_child
+  exit $?
+fi
+
+if ((self_test)); then
+  run_self_test
+  exit $?
+fi
+
+[[ "$runs" =~ ^[0-9]+$ ]] || { echo '--runs must be an integer' >&2; exit 64; }
+((runs >= REQUIRED_RUNS)) || {
+  echo "--runs may not weaken native acceptance below $REQUIRED_RUNS" >&2
+  exit 64
+}
+
 write_environment_blocker() {
   local blocker=$1
+  local applicability=${2:-APPLICABLE_BLOCKED_ENVIRONMENT}
   local recorded_at
-  recorded_at=$(now_iso)
-  jq -n \
-    --arg status 'BLOCKED_ENVIRONMENT' \
-    --arg blocker "$blocker" \
-    --arg recordedAt "$recorded_at" \
-    --arg head "$(git rev-parse HEAD)" \
-    '{schemaVersion:1,status:$status,environmentBlocker:$blocker,recordedAt:$recordedAt,head:$head,runs:[]}' \
-    >"$summary_path"
+  # Applicability can be decided before GNU/Linux-specific tools exist. Keep
+  # this timestamp portable across BSD/macOS date and common Windows shells.
+  recorded_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || printf '%s' unknown)
   printf 'NATIVE_RELEASE_QUALIFICATION=BLOCKED_ENVIRONMENT\n'
+  printf 'native_lane=linux-x11-i3\n'
+  printf 'native_applicability=%s\n' "$applicability"
   printf 'environment_blocker=%s\n' "$blocker"
-  printf 'summary=%s\n' "$summary_path"
+  if command -v jq >/dev/null 2>&1; then
+    jq -n \
+      --arg status 'BLOCKED_ENVIRONMENT' \
+      --arg blocker "$blocker" \
+      --arg lane 'linux-x11-i3' \
+      --arg applicability "$applicability" \
+      --arg recordedAt "$recorded_at" \
+      --arg head "$(git rev-parse HEAD)" \
+      '{schemaVersion:1,status:$status,environmentBlocker:$blocker,recordedAt:$recordedAt,head:$head,
+        nativeApplicability:{lane:$lane,result:$applicability},runs:[]}' \
+      >"$summary_path"
+    printf 'summary=%s\n' "$summary_path"
+  else
+    printf 'summary_unavailable=jq is unavailable\n'
+  fi
   exit 2
 }
 
-for tool in awk bash cargo curl date grep i3-msg jq pnpm ps readlink sed setsid sha256sum sort ss tr wmctrl xprop; do
+platform_name=$(uname -s 2>/dev/null || printf '%s' unknown)
+if [[ "$(native_lane_platform_result "$platform_name")" != 'APPLICABLE' ]]; then
+  write_environment_blocker \
+    "native Linux/X11/i3 qualification is not applicable on platform '$platform_name'; use the generic release:verify gate for platform-independent regression checks" \
+    'NOT_APPLICABLE'
+fi
+
+for tool in awk bash cargo curl date grep i3-msg jq pnpm ps readlink sed setsid sha256sum sort ss tr uname wmctrl xprop; do
   command -v "$tool" >/dev/null || write_environment_blocker "required tool unavailable: $tool"
 done
 
-[[ -n "${DISPLAY:-}" ]] || write_environment_blocker 'DISPLAY is unset; X11 native qualification is unavailable'
-i3-msg -t get_version >/dev/null 2>&1 || write_environment_blocker 'i3 IPC is unavailable on the active X11 session'
-xprop -root _NET_ACTIVE_WINDOW >/dev/null 2>&1 || write_environment_blocker 'X11 root-window focus authority is unavailable'
+[[ -n "${DISPLAY:-}" ]] || write_environment_blocker 'DISPLAY is unset; X11 native qualification is unavailable' 'PREREQUISITE_UNAVAILABLE'
+i3-msg -t get_version >/dev/null 2>&1 || write_environment_blocker 'i3 IPC is unavailable on the active X11 session' 'PREREQUISITE_UNAVAILABLE'
+xprop -root _NET_ACTIVE_WINDOW >/dev/null 2>&1 || write_environment_blocker 'X11 root-window focus authority is unavailable' 'PREREQUISITE_UNAVAILABLE'
 
 original_workspace=$(focused_workspace)
 [[ -n "$original_workspace" ]] || write_environment_blocker 'i3 has no focused workspace to restore after qualification'
@@ -984,6 +1397,7 @@ jq -n \
   '{
     schemaVersion:$schemaVersion,status:$status,recordedAt:$recordedAt,head:$head,
     desktop:{originalWorkspace:$originalWorkspace,controlledWorkspace:$controlledWorkspace,serverMode:$serverMode},
+    nativeApplicability:{lane:"linux-x11-i3",result:"APPLICABLE"},
     contract:{minimumSerializedRuns:3,readinessMarker:$readinessMarker,maxExternalHandoffsPerRun:1,
       noContinuousRefocus:true,noSyntheticClicks:true,noHiddenHelperWindows:true,nativeFpsAuthority:true,
       browserSupplementalOnly:true,browserNativeFpsClaim:false},

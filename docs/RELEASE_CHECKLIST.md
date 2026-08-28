@@ -21,7 +21,7 @@ Use:
 pnpm release:verify
 ```
 
-This runs the complete TypeScript build/test/typecheck/lint matrix, Rust core fmt/clippy/tests, Tauri fmt/clippy/tests/check, and `git diff --check`. It also reports release-candidate metadata that is not yet satisfied without turning those development-state warnings into false regression failures.
+This runs the complete TypeScript build/test/typecheck/lint matrix, Rust core fmt/clippy/tests, Tauri fmt/clippy/tests/check, and `git diff --check`. It also reports release-candidate metadata that is not yet satisfied without turning those development-state warnings into false regression failures. This generic regression gate is independent of i3/X11 and remains the cross-platform release verification entry point.
 
 For the Linux i3/X11 native GPU/projection qualification lane, also use:
 
@@ -29,7 +29,9 @@ For the Linux i3/X11 native GPU/projection qualification lane, also use:
 pnpm release:native-qualify
 ```
 
-That operator gate is deliberately environment-sensitive and fail-closed. It creates only a previously absent controlled i3 workspace, refuses to reuse/steal an existing workspace, rejects competing native/cargo/browser-headed Gitinspect runners, waits for the exact native GraphScene/WebGL convergence marker, permits at most one external Tauri handoff per run, records X11 active-window/window-class/workspace plus strict native focus/selection evidence, and requires at least three serialized green runs. It restores the operator's original workspace afterward. Browser hardware-WebGL remains supplemental (`nativeFpsClaim=false`), and AT-SPI/native accessibility-tree qualification remains a separate read-only boundary.
+That operator gate is deliberately environment-sensitive and fail-closed. Its applicability lane is explicitly `linux-x11-i3`: a non-Linux platform reports `NOT_APPLICABLE`, while a Linux host lacking DISPLAY/i3/X11 focus authority reports `PREREQUISITE_UNAVAILABLE`; both return non-zero rather than manufacturing native evidence. This lane is not an unconditional macOS/Windows packaging prerequisite. When applicable, it creates only a previously absent controlled i3 workspace, refuses to reuse/steal an existing workspace, rejects competing native/cargo/browser-headed Gitinspect runners, waits for the exact native GraphScene/WebGL convergence marker, permits at most one external Tauri handoff per run, records X11 active-window/window-class/workspace plus strict native focus/selection evidence, and requires at least three serialized green runs. It restores the operator's original workspace afterward. Browser hardware-WebGL remains supplemental (`nativeFpsClaim=false`), and AT-SPI/native accessibility-tree qualification remains a separate read-only boundary.
+
+`pnpm release:native-gate-test` is desktop-independent. In addition to exact executable/argv provenance regressions, it sends both TERM and INT through the production cleanup trap against gate-owned dummy native, monitor, and server process trees using repository-local runtime state and kernel-assigned loopback ports. The test requires every owned descendant/listener and runtime directory to disappear while a separately established loopback listener retains the same process identity and remains reachable. It never stops or reuses a pre-existing desktop/Vite listener to manufacture ownership.
 
 When preparing an actual candidate, use:
 
