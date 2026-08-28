@@ -365,7 +365,7 @@ Phase-43 evidence on the repaired gate bytes:
 - `.ws-bridge/evidence/gitinspect-phase43-adversarial.txt` — adversarial blocker and one-handoff challenge evidence;
 - `.ws-bridge/evidence/gitinspect-phase43-native-qualification.txt` — SHA256 `8f5b1d43e8f4ad118cbccb282b56f2b2edb8c5c9e513b80b0c8624b8f769ef91`;
 - `.ws-bridge/evidence/gitinspect-phase43-native-qualification.json` — SHA256 `d64abb50f9b879cefdc33fd8150060e4eb409b8f9e5654597c88d457ffc69050`;
-- `.ws-bridge/evidence/gitinspect-phase43-interaction.txt` — SHA256 `2dc0750f09c63eb0bd409c9d012397d47ad80adf29cd34196775dcf03165d95a`;
+- `.ws-bridge/evidence/gitinspect-phase43-interaction.txt` — SHA256 `b2f1e8449dd996a5a2fa6b681a72c7fb242efc44d534012ff6f6992aeaaa00ae`;
 - `.ws-bridge/evidence/gitinspect-phase43-at-spi.txt` — SHA256 `847840e3f11db716e9295acee60ab824ee35c839e4be6a6fe92b76a4f6d6d9b9`.
 
 Original apply remains **NO-GO/unavailable**. No original-repository mutation path, command, capability, UI enablement, authorization widening, Phase-28–31 safety-case reopening, package enablement, publish, deploy, tag, or release action was introduced.
