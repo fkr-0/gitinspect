@@ -22,50 +22,108 @@ summary_path=''
 self_test=0
 
 classify_headed_runner() {
-  local real_executable=${1:-}
-  local argv0=${2:-}
-  local argv=${3:-}
+  (($# >= 2)) || return 1
+  local real_executable=$1
+  local argv0=$2
+  shift 2
   local real_base=${real_executable##*/}
   local argv0_base=${argv0##*/}
-  local cargo_mode=0
+  local arg name i
 
   case "$real_base" in
     mutation_preview_native_smoke|native_visual_smoke|native_bridge_smoke|gitinspect)
       printf '%s\n' "$real_base"
       return 0
       ;;
-    node)
-      if [[ "$argv" =~ (^|[[:space:]])([^[:space:]]*/)?mutation-preview-headed-webgl\.mjs([[:space:]]|$) ]]; then
-        printf '%s\n' 'browser-headed-webgl'
-        return 0
-      fi
+    node|nodejs)
+      for arg in "$@"; do
+        if [[ "${arg##*/}" == 'mutation-preview-headed-webgl.mjs' ]]; then
+          printf '%s\n' 'browser-headed-webgl'
+          return 0
+        fi
+      done
+      return 1
       ;;
     cargo)
-      cargo_mode=1
       ;;
     rustup)
-      # Arch's /usr/bin/cargo is a rustup proxy. Accept that proxy only when
-      # argv[0] identifies cargo mode; a renamed/spoofed rustup invocation is
-      # not executable provenance for a Cargo native-smoke launcher.
-      [[ "$argv0_base" == 'cargo' ]] && cargo_mode=1
+      # On rustup-managed hosts /usr/bin/cargo resolves to the rustup proxy.
+      # Accept that proxy only when the process was actually invoked as cargo;
+      # an arbitrary process with cargo-shaped argv must not become a blocker.
+      [[ "$argv0_base" == 'cargo' ]] || return 1
+      ;;
+    *)
+      return 1
       ;;
   esac
 
-  if ((cargo_mode)) && [[ "$argv" =~ (^|[[:space:]])run([[:space:]]|$) ]]; then
-    if [[ "$argv" =~ (^|[[:space:]])--bin(=|[[:space:]]+)mutation_preview_native_smoke([[:space:]]|$) ]]; then
-      printf '%s\n' 'cargo-mutation-preview-native-smoke'
-      return 0
+  # Preserve argv boundaries and require `run` to be the actual Cargo
+  # subcommand. A later positional `run` (for example a test filter) must not
+  # turn another Cargo command into a competing headed launcher. Support only
+  # the bounded leading global/proxy options that can legitimately precede a
+  # Cargo subcommand; unknown pre-subcommand tokens fail closed.
+  local -a args=("$@")
+  local run_index=-1
+  for ((i=0; i<${#args[@]}; i+=1)); do
+    case "${args[i]}" in
+      run)
+        run_index=$i
+        break
+        ;;
+      -v|--verbose|-q|--quiet|--frozen|--locked|--offline|+*)
+        ;;
+      --color|--config|-Z)
+        ((i + 1 < ${#args[@]})) || return 1
+        i=$((i + 1))
+        ;;
+      --color=*|--config=*|-Z?*)
+        ;;
+      *)
+        return 1
+        ;;
+    esac
+  done
+  ((run_index >= 0)) || return 1
+  for ((i=run_index + 1; i<${#args[@]}; i+=1)); do
+    [[ "${args[i]}" == '--' ]] && break
+    name=''
+    if [[ "${args[i]}" == '--bin' ]] && ((i + 1 < ${#args[@]})); then
+      name=${args[i + 1]}
+    elif [[ "${args[i]}" == --bin=* ]]; then
+      name=${args[i]#--bin=}
     fi
-    if [[ "$argv" =~ (^|[[:space:]])--bin(=|[[:space:]]+)native_visual_smoke([[:space:]]|$) ]]; then
-      printf '%s\n' 'cargo-native-visual-smoke'
-      return 0
-    fi
-    if [[ "$argv" =~ (^|[[:space:]])--bin(=|[[:space:]]+)native_bridge_smoke([[:space:]]|$) ]]; then
-      printf '%s\n' 'cargo-native-bridge-smoke'
-      return 0
-    fi
-  fi
+    case "$name" in
+      mutation_preview_native_smoke)
+        printf '%s\n' 'cargo-mutation-preview-native-smoke'
+        return 0
+        ;;
+      native_visual_smoke)
+        printf '%s\n' 'cargo-native-visual-smoke'
+        return 0
+        ;;
+      native_bridge_smoke)
+        printf '%s\n' 'cargo-native-bridge-smoke'
+        return 0
+        ;;
+    esac
+  done
   return 1
+}
+
+headed_runner_record_for_pid() {
+  local pid=$1 real_executable argv0 kind argv_display arg
+  local -a argv=()
+  real_executable=$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)
+  [[ -n "$real_executable" ]] || return 1
+  while IFS= read -r -d '' arg; do
+    argv+=("$arg")
+  done <"/proc/$pid/cmdline" 2>/dev/null || true
+  ((${#argv[@]} > 0)) || return 1
+  argv0=${argv[0]}
+  kind=$(classify_headed_runner "$real_executable" "$argv0" "${argv[@]:1}" 2>/dev/null || true)
+  [[ -n "$kind" ]] || return 1
+  printf -v argv_display '%q ' "${argv[@]}"
+  printf '%s\t%s\t%s exe=%s argv=%s\n' "$pid" "$kind" "$pid" "$real_executable" "${argv_display% }"
 }
 
 wm_class_matches_expected() {
@@ -83,45 +141,82 @@ run_self_test() {
   local failures=0 actual=''
 
   assert_runner() {
-    local expected=$1 real_executable=$2 argv0=$3 argv=$4
-    actual=$(classify_headed_runner "$real_executable" "$argv0" "$argv" 2>/dev/null || true)
+    local expected=$1 real_executable=$2 argv0=$3
+    shift 3
+    actual=$(classify_headed_runner "$real_executable" "$argv0" "$@" 2>/dev/null || true)
     if [[ "$actual" != "$expected" ]]; then
-      printf 'self_test_failure=runner expected=%s actual=%s real_executable=%s argv0=%s argv=%s\n' "$expected" "$actual" "$real_executable" "$argv0" "$argv" >&2
+      printf 'self_test_failure=runner expected=%s actual=%s real_executable=%s argv0=%s\n' "$expected" "$actual" "$real_executable" "$argv0" >&2
       failures=$((failures + 1))
     fi
   }
 
   assert_no_runner() {
-    local real_executable=$1 argv0=$2 argv=$3
-    actual=$(classify_headed_runner "$real_executable" "$argv0" "$argv" 2>/dev/null || true)
+    local real_executable=$1 argv0=$2
+    shift 2
+    actual=$(classify_headed_runner "$real_executable" "$argv0" "$@" 2>/dev/null || true)
     if [[ -n "$actual" ]]; then
-      printf 'self_test_failure=false-positive runner=%s real_executable=%s argv0=%s argv=%s\n' "$actual" "$real_executable" "$argv0" "$argv" >&2
+      printf 'self_test_failure=false-positive runner=%s real_executable=%s argv0=%s\n' "$actual" "$real_executable" "$argv0" >&2
       failures=$((failures + 1))
     fi
   }
 
-  # Direct native executables are identified from the real executable even if
-  # argv[0] is unusual; spoofing argv[0] cannot hide an actual native runner.
-  assert_runner mutation_preview_native_smoke /repo/target/debug/mutation_preview_native_smoke harmless-name 'harmless-name'
-  assert_runner gitinspect /usr/bin/gitinspect gitinspect 'gitinspect'
+  assert_runner mutation_preview_native_smoke /repo/target/debug/mutation_preview_native_smoke /repo/target/debug/mutation_preview_native_smoke
+  assert_runner gitinspect /usr/bin/gitinspect /usr/bin/gitinspect
+  assert_runner cargo-mutation-preview-native-smoke /usr/bin/cargo /usr/bin/cargo run --manifest-path app/Cargo.toml --bin mutation_preview_native_smoke
+  assert_runner cargo-mutation-preview-native-smoke /usr/bin/rustup /usr/bin/cargo run --bin=mutation_preview_native_smoke
+  assert_runner cargo-native-visual-smoke /usr/bin/rustup cargo run --bin native_visual_smoke
+  assert_runner cargo-native-bridge-smoke /usr/bin/cargo cargo run --bin native_bridge_smoke
+  assert_runner cargo-mutation-preview-native-smoke /usr/bin/cargo cargo --locked run --bin mutation_preview_native_smoke
+  assert_runner cargo-mutation-preview-native-smoke /usr/bin/rustup cargo +stable run --bin=mutation_preview_native_smoke
+  assert_runner browser-headed-webgl /usr/local/bin/node /usr/local/bin/node /repo/scripts/mutation-preview-headed-webgl.mjs --headed
+  assert_runner browser-headed-webgl /usr/bin/nodejs nodejs /repo/scripts/mutation-preview-headed-webgl.mjs --headed
+  assert_no_runner /usr/bin/cargo cargo run --bin mutation_preview_native_smoke_extra
+  assert_no_runner /usr/bin/cargo cargo run '--bin mutation_preview_native_smoke'
+  assert_no_runner /usr/bin/cargo cargo test --bin mutation_preview_native_smoke
+  assert_no_runner /usr/bin/cargo cargo build --bin=mutation_preview_native_smoke
+  assert_no_runner /usr/bin/cargo cargo test run --bin mutation_preview_native_smoke
+  assert_no_runner /usr/bin/cargo cargo build run --bin=mutation_preview_native_smoke
+  assert_no_runner /usr/bin/cargo cargo run -- --bin mutation_preview_native_smoke
+  assert_no_runner /usr/bin/cargo cargo '--manifest-path app/Cargo.toml run --bin mutation_preview_native_smoke'
+  assert_no_runner /usr/bin/node node /repo/scripts/mutation-preview-headed-webgl.mjs.backup
+  assert_no_runner /usr/bin/node node '/repo/scripts/not-the-runner mutation-preview-headed-webgl.mjs'
+  assert_no_runner /usr/bin/bash bash -c 'echo mutation_preview_native_smoke'
+  assert_no_runner /usr/bin/sleep /repo/target/debug/mutation_preview_native_smoke 30
+  assert_no_runner /usr/bin/python3.14 cargo -c 'import time; time.sleep(30)' --bin=mutation_preview_native_smoke
+  assert_no_runner /usr/bin/python3.14 node -c 'import time; time.sleep(30)' /repo/scripts/mutation-preview-headed-webgl.mjs
+  assert_no_runner /usr/bin/rustup rustup run stable cargo run --bin mutation_preview_native_smoke
 
-  # Cargo may be a real cargo executable or the host rustup proxy in cargo mode.
-  assert_runner cargo-mutation-preview-native-smoke /usr/bin/cargo cargo 'cargo run --manifest-path app/Cargo.toml --bin mutation_preview_native_smoke'
-  assert_runner cargo-mutation-preview-native-smoke /usr/bin/rustup cargo 'cargo run --bin=mutation_preview_native_smoke'
-  assert_runner cargo-native-visual-smoke /usr/bin/rustup cargo 'cargo run --bin native_visual_smoke'
-  assert_runner cargo-native-bridge-smoke /usr/bin/cargo cargo 'cargo run --bin native_bridge_smoke'
+  # Exercise the production /proc provenance seam, not only the pure classifier:
+  # argv[0] is deliberately spoofed as the native smoke binary while the actual
+  # executable remains /usr/bin/sleep. This must not become a competing runner.
+  local spoof_pid spoof_record=''
+  bash -c 'exec -a mutation_preview_native_smoke sleep 5' &
+  spoof_pid=$!
+  sleep 0.05
+  spoof_record=$(headed_runner_record_for_pid "$spoof_pid" 2>/dev/null || true)
+  kill "$spoof_pid" 2>/dev/null || true
+  wait "$spoof_pid" 2>/dev/null || true
+  if [[ -n "$spoof_record" ]]; then
+    printf 'self_test_failure=argv0-spoof false-positive record=%s\n' "$spoof_record" >&2
+    failures=$((failures + 1))
+  fi
 
-  assert_runner browser-headed-webgl /usr/bin/node node 'node /repo/scripts/mutation-preview-headed-webgl.mjs --headed'
-
-  # argv[0] and argv text alone are never executable provenance.
-  assert_no_runner /usr/bin/sleep /repo/target/debug/mutation_preview_native_smoke '/repo/target/debug/mutation_preview_native_smoke 30'
-  assert_no_runner /usr/bin/python3 cargo 'cargo run --bin=mutation_preview_native_smoke'
-  assert_no_runner /usr/bin/python3 node 'node /repo/scripts/mutation-preview-headed-webgl.mjs --headed'
-  assert_no_runner /usr/bin/rustup rustup 'cargo run --bin=mutation_preview_native_smoke'
-  assert_no_runner /usr/bin/cargo cargo 'cargo test --bin mutation_preview_native_smoke'
-  assert_no_runner /usr/bin/cargo cargo 'cargo run --bin mutation_preview_native_smoke_extra'
-  assert_no_runner /usr/bin/node node 'node /repo/scripts/mutation-preview-headed-webgl.mjs.backup'
-  assert_no_runner /usr/bin/bash bash 'bash -c echo mutation_preview_native_smoke'
+  # Preserve real argv boundaries through the production /proc reader. `ps args`
+  # would flatten this one embedded-space argument and manufacture a false exact
+  # browser-script token; the NUL-delimited cmdline reader must reject it.
+  if command -v node >/dev/null 2>&1; then
+    local node_pid node_record=''
+    node -e 'setTimeout(() => {}, 5000)' '/repo/not-the-runner mutation-preview-headed-webgl.mjs' &
+    node_pid=$!
+    sleep 0.05
+    node_record=$(headed_runner_record_for_pid "$node_pid" 2>/dev/null || true)
+    kill "$node_pid" 2>/dev/null || true
+    wait "$node_pid" 2>/dev/null || true
+    if [[ -n "$node_record" ]]; then
+      printf 'self_test_failure=embedded-space-node-argv false-positive record=%s\n' "$node_record" >&2
+      failures=$((failures + 1))
+    fi
+  fi
 
   wm_class_matches_expected "$EXPECTED_WM_CLASS" || { echo 'self_test_failure=exact WM_CLASS rejected' >&2; failures=$((failures + 1)); }
   if wm_class_matches_expected '"mutation_preview_native_smoke", "Other"'; then
@@ -316,16 +411,11 @@ window_workspace() {
 }
 
 headed_runner_processes() {
-  local pid argv argv0 real_executable kind
-  while read -r pid argv; do
-    [[ -n "$pid" && -n "$argv" ]] || continue
-    argv0=${argv%% *}
-    real_executable=$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)
-    [[ -n "$real_executable" ]] || continue
-    kind=$(classify_headed_runner "$real_executable" "$argv0" "$argv" 2>/dev/null || true)
-    [[ -n "$kind" ]] || continue
-    printf '%s\t%s\t%s\t%s\n' "$pid" "$kind" "$real_executable" "$argv"
-  done < <(ps -ww -eo pid=,args=)
+  local pid
+  while read -r pid; do
+    [[ -n "$pid" ]] || continue
+    headed_runner_record_for_pid "$pid" 2>/dev/null || true
+  done < <(ps -e -o pid=)
 }
 
 native_smoke_process_count() {
