@@ -1,8 +1,8 @@
 # Mutation Studio Audit
 
-Status: **Phase 38 COMPLETE/GREEN** for preview-only transformed-topology continuity and controlled headed scheduling authority. The Phase-37 8.292 s event is now reproducibly tied to the native window/workspace visibility/focus condition: hidden/unfocused native WebKit fails closed with zero accepted samples, while two visible/focused native runs recover 16/17 ms median/p95 cadence with 17 ms maxima. CPU planner timing remains separate and is never substituted for GPU evidence. A universal strict 16.7 ms frame-budget guarantee remains explicitly **unclaimed**.
+Status: **Phase 39 BLOCKED** for native projected-node accessibility determinism. Phase 38 remains COMPLETE/GREEN authority for preview-only transformed-topology continuity and controlled headed scheduling: hidden/unfocused native WebKit fails closed with zero accepted samples, while controlled visible/focused runs establish native cadence authority. Phase 39 fixes a concrete zero-height viewport projection defect and makes browser/native projected-node gates strict, but controlled native Tauri/WebKit reruns still intermittently time out waiting for a real authoritative transformed projected node. CPU planner timing remains separate and is never substituted for GPU evidence. A universal strict 16.7 ms frame-budget guarantee remains explicitly **unclaimed**.
 
-Authority boundary: Gitinspect mutation execution remains **disposable-copy preview only**. The application exposes no original-repository apply command. The Phase-28 through Phase-31 original-apply safety case remains **NO-GO** and is not reopened or weakened by Phase 38.
+Authority boundary: Gitinspect mutation execution remains **disposable-copy preview only**. The application exposes no original-repository apply command. The Phase-28 through Phase-31 original-apply safety case remains **NO-GO** and is not reopened or weakened by Phase 39.
 
 ## Phase-37 durable implementation commits
 
@@ -204,3 +204,35 @@ Phase 39 should remain preview-only and focus on the remaining **headed projecte
 3. exercise keyboard traversal/context/selection continuity across representative unique rewrite, split, drop, stale, conflict, cancellation, and truncated-preview transitions without inventing ambiguous successors;
 4. retain the current provenance-aware native/browser headed timing gates and fail closed again if visibility/focus authority is lost;
 5. leave original-repository apply **NO-GO/unavailable**.
+
+## Phase-39 projected-node accessibility closure
+
+Durable implementation commit: `62d5625` (`fix(app): qualify projected graph accessibility`). Phase 39 fixes a concrete real-render-path defect but remains **BLOCKED** on the decisive native projected-node criterion because Tauri/WebKit projection is not reproducibly deterministic.
+
+The production path was traced as `GraphViewport -> GraphScene/R3F -> ViewportProjectionBridge -> projected accessibility overlay`. A headed diagnostic measured the standalone production viewport at **1280 x 0 CSS px**, with a fallback **300 x 150** canvas and **0 projected overlay buttons**, while the authoritative transformed mutation live summary was already present. Selected/search identities were already promoted before label budgeting and the scale planner already admitted selected topology at full LOD. The measured Phase-38 failure was therefore a viewport/container projection defect, not rewrite lineage, LOD, label budgeting, stale authority, or transformed-node admission.
+
+`62d5625` gives `.viewport` an explicit 100% width/height fill contract and exposes each projected overlay button's already-resolved semantic identity as `data-element-id`. The headed gates now require real production-projected authoritative transformed IDs, `aria-pressed=true`, one and only one roving tab stop on that same ID, a polite mutation live region, and no blocker. The native gate separately verifies the effective old->new rewrite selection announcement before it interacts with the first authoritative graph-delta commit that is actually camera-projected. No test-only overlay node, hidden graph model, projection relaxation, or invented split/drop successor was added.
+
+Browser-headed hardware-WebGL corroboration is green and remains explicitly supplemental: 3 x 120 visible/focused samples, 16.7 ms transition medians, 16.7/16.7/16.8 ms p95, 16.8/16.8/50 ms maxima, 31.8/33.3/88.4 ms topology commit latency, and live/pressed/roving all true with an empty blocker. The report retains `nativeFpsClaim=false`.
+
+Native Tauri/WebKit is **not qualified**. A transient diagnostic run observed real projected live/pressed/roving success, but subsequent controlled runs using exactly one focus handoff to the newly-created Tauri window failed closed at `Timed out waiting for projected authoritative transformed node`. Because the same production contract does not reproduce reliably, Phase 39 does not cherry-pick the successful observation. Phase 38 remains the native frame-scheduling authority, and the deeper compositor/WebKit/camera-projection timing cause remains unresolved rather than guessed. A universal strict 16.7 ms frame-budget guarantee remains unclaimed.
+
+AT-SPI also remains an explicit environment boundary. The broker returns `unix:path=/run/user/1000/at-spi/bus_0`, while `IsEnabled=false` and `ScreenReaderEnabled=false`; native Tauri/WebKit runs emit accessibility-bus connection-refused warnings. No native accessibility-tree or screen-reader success is claimed.
+
+Interaction continuity remains release-green through the production semantic model: unique rewrite follows its unique successor; split/drop clear rather than inventing a successor; stale/conflict/truncated authority preserves caller selection; clear/cancellation restores durable selection without transitional residue; Arrow/Home/End roving, Context Menu/Shift+F10, `aria-pressed`, and polite live-region semantics remain covered. The focused interaction matrix is **34/34** green.
+
+Fresh `pnpm release:verify` at `62d5625` is green: graph-elements **48/48**, app **149/149**, recursive typecheck, Biome lint, build, gitinspect-core fmt/clippy/tests, Tauri fmt/clippy/tests/check, and Git whitespace checks all pass. CPU/planner/search scale totals are 23.836 ms at 1k, 107.088 ms at 10k, and 1512.941 ms at 100k; the 100k fuzzy probe is 15.478 ms. These remain CPU/planner/search metrics, not FPS evidence. Startup entry JS is **359.33 kB minified / 107.00 kB gzip**, below the <1 MB startup gate; the deferred GraphScene chunk remains **1,034.30 kB / 280.95 kB gzip** and is not counted as startup entry budget.
+
+Phase-39 durable evidence:
+
+- `.ws-bridge/evidence/gitinspect-phase39-headed-native.txt` — SHA256 `40bb5203851720d2e6d8ef8b1cb47931e156628fcd3c6731c6c3740cf64a339a`
+- `.ws-bridge/evidence/gitinspect-phase39-headed-browser.txt` — SHA256 `24b672a314c2db4f14b9521dc4e43779decbcf35bbe64f06c5ba85641c12934f`
+- `.ws-bridge/evidence/gitinspect-phase39-release-check.txt` — SHA256 `f450a5db71be14a6c9801a44209a9083b787833de82fb51c79a2a706dd7b04e5`
+- `.ws-bridge/evidence/gitinspect-phase39-at-spi.txt` — SHA256 `f174b8e822b818a99877fb926497ed94fee4d52b9fbabbf460efad100d614c62`
+- `.ws-bridge/evidence/gitinspect-phase39-final.md` — SHA256 `3dbd41c3f809c8d35b120f5abd5e4938afc6c7a5d9b77f64ed2a32cbaf86ff81`
+
+Original apply remains **NO-GO/unavailable**. No original-repository mutation command, capability, UI enablement, authorization widening, safety-case reopening, publish, deploy, or release action was introduced.
+
+## Next bounded tranche
+
+Phase 40 should remain preview-only and bounded to **native projection/camera-handoff determinism only**: instrument the real visible/focused Tauri `GraphScene` camera-fit and `ViewportProjectionBridge` lifecycle, determine why authoritative transformed projected points can disappear after topology commit, and require repeated real-node success before lifting the blocker. Browser evidence must remain supplemental, AT-SPI must remain unclaimed while disabled, projection/LOD semantics must not be weakened, and original apply remains **NO-GO**.
