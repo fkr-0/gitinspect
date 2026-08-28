@@ -1,8 +1,8 @@
 # Mutation Studio Audit
 
-Status: **Phase 41 COMPLETE/GREEN** for isolated repeated native focus/projection acceptance. Phase 40 correctly failed closed when unrelated desktop activity repeatedly superseded the one permitted Tauri focus handoff. Phase 41 isolates qualification on an otherwise-unused i3 workspace and reproduces the unchanged real-node native contract three consecutive times: visible/focused throughout, 120 real rAF samples per run, zero focus/visibility transitions, selected authoritative transformed semantic ID projected with `aria-pressed=true`, exactly one roving tab stop, and an empty blocker. No production camera/projection/LOD/selection change was required. CPU planner timing remains separate and is never substituted for GPU evidence. A universal strict 16.7 ms frame-budget guarantee remains explicitly **unclaimed**.
+Status: **Phase 42 COMPLETE/GREEN** for a repository-owned, fail-closed native release/operator qualification gate. The Phase-41 isolation recipe is now executable through `pnpm release:native-qualify`: it proves a previously absent controlled i3/X11 workspace, refuses existing workspaces, rejects competing headed Gitinspect runners, waits for the exact GraphScene/WebGL convergence marker, permits at most one external Tauri handoff, records machine-checkable X11/window/focus/semantic provenance, and requires at least three unchanged strict native passes. Final qualification is 3/3 green with 120 real rAF samples per run, visible/focused throughout, zero focus/visibility transitions, the real authoritative transformed semantic ID selected with `aria-pressed=true`, exactly one roving tab stop, empty blockers, and zero unrelated active-window transitions after handoff. No production camera/projection/LOD/selection change was required. CPU planner timing remains separate and is never substituted for GPU evidence. A universal strict 16.7 ms frame-budget guarantee remains explicitly **unclaimed**.
 
-Authority boundary: Gitinspect mutation execution remains **disposable-copy preview only**. The application exposes no original-repository apply command. The Phase-28 through Phase-31 original-apply safety case remains **NO-GO** and is not reopened or weakened by Phase 41.
+Authority boundary: Gitinspect mutation execution remains **disposable-copy preview only**. The application exposes no original-repository apply command. The Phase-28 through Phase-31 original-apply safety case remains **NO-GO** and is not reopened or weakened by Phase 42.
 
 ## Phase-37 durable implementation commits
 
@@ -297,6 +297,46 @@ Phase-41 durable evidence:
 
 Original apply remains **NO-GO/unavailable**. No original-repository mutation command, capability, UI enablement, authorization widening, safety-case reopening, publish, deploy, tag, or release action was introduced.
 
+## Phase-42 fail-closed native release/operator gate
+
+Phase 42 adds repository-owned release tooling only; production projection, LOD, selection, mutation, and authorization semantics are unchanged. The operator entrypoint is `pnpm release:native-qualify`, backed by `scripts/native-release-qualification.sh` (final pre-commit SHA256 `7c74ce0d6b95ed40178417fcd48666153757cca5dd8781223cac194588dd2e0c`) and a matching ws-bridge release command.
+
+The gate is intentionally narrower and stricter than ad-hoc desktop automation:
+
+- it requires X11+i3 and an absent controlled workspace; the default bounded search selected workspace **9**, and a forced attempt to reuse existing workspace 3 failed closed with `BLOCKED_ENVIRONMENT` and `window_count=3` rather than moving or stealing those windows;
+- it rejects `--runs < 3`, so operator flags cannot weaken the minimum repeated-native acceptance;
+- it proves zero exact native smoke, native visual/bridge, production Gitinspect, cargo native-smoke launchers, and browser-headed corroboration runners before qualification, then requires exactly one native smoke runner at each handoff;
+- it hashes the exact native binary, Rust harness, TypeScript smoke fixture, and gate source, discovers the newly-created X11 client from `_NET_CLIENT_LIST`, verifies its `WM_CLASS`, title, i3 workspace, and launched executable provenance, and records `_NET_ACTIVE_WINDOW` transitions;
+- it waits for the exact `headed native focus handoff ready after GraphScene/WebGL convergence…` progress marker before issuing the sole external `wmctrl -ia`; it contains no refocus loop, click synthesis, hidden helper window, or arbitrary post-handoff success delay;
+- it fails if any unrelated non-zero `_NET_ACTIVE_WINDOW` is observed after the handoff, while the native harness independently requires visible/focused frame provenance and zero visibility/focus/blur events throughout the measured window;
+- cleanup kills only gate-owned in-flight runner/monitor/server processes, restores the original i3 workspace, and leaves the newly-created controlled workspace absent after the final window closes.
+
+Two wrapper defects found during construction were resolved without touching product semantics: one exact-title parser translated the X11 property's terminating newline into a trailing space, and an initial runner detector used Linux's truncated `ps comm` field. Both versions failed closed; the final wrapper uses the exact parsed title and untruncated argv executable basename. `bash -n`, ShellCheck, and `git diff --check` are green on the final gate bytes.
+
+The final serialized native series is **3/3 green** on otherwise-unused workspace 9. Every run records `frame_renderer=Apple GPU`, 120 real rAF samples, `visibilityState=visible`, `documentHasFocus=true`, zero visibility changes, zero focus events, zero blur events, an empty timing blocker, and zero unrelated active-window transitions after handoff. Every run selects the real authoritative transformed semantic ID `commit:ffffffffffffffffffffffffffffffff00000003` with live/pressed/exact-one-roving all true, stable focus, and an empty accessibility blocker. The one permitted external handoff sees the exact Tauri window already active before/after because the existing native harness can focus its own window first; no later desktop takeover occurs.
+
+Final frame timing remains genuine native evidence but is not promoted to a universal frame-budget claim:
+
+| Run | Samples | baseline median/p95 | transition median/p95/max | topology commit |
+| --- | ---: | --- | --- | ---: |
+| 1 | 120 | 16/21 ms | 16/21/24 ms | 27 ms |
+| 2 | 120 | 16/21 ms | 16/22/25 ms | 44 ms |
+| 3 | 120 | 16/21 ms | 16/23/32 ms | 30 ms |
+
+Focused transformed-topology/preview interaction continuity is **34/34** green. Fresh `pnpm release:verify` is green: graph-elements **48/48**, app **149/149**, TypeScript/lint/build, gitinspect-core and Tauri fmt/clippy/tests/check, and whitespace gates all pass. CPU/planner/search scale totals are **17.754 ms** at 1k, **97.751 ms** at 10k, and **1259.969 ms** at 100k; the 100k fuzzy probe is **14.912 ms**. These remain CPU/planner/search measurements only and are distinct from the native GPU/requestAnimationFrame evidence. Startup entry JS is **360.48 kB minified / 107.37 kB gzip**, below the <1 MB gate; deferred `GraphScene` is **1,037.23 kB / 281.54 kB gzip** and is not counted as startup entry budget.
+
+Browser hardware-WebGL was not used as Phase-42 acceptance authority. Its production runner still hard-codes and validates `nativeFpsClaim=false`; existing browser evidence remains supplemental only. AT-SPI was reprobed read-only: `org.a11y.Bus` exposes its private bus address, but `org.a11y.Status` is not activatable and direct registry probing fails. Qualification therefore remains `BLOCKED_ENVIRONMENT`, with `native_accessibility_tree_claim=false` and `screen_reader_claim=false`.
+
+Phase-42 evidence before the final source commit:
+
+- `.ws-bridge/evidence/gitinspect-phase42-native-qualification.txt` — SHA256 `4751d80ccdd408db76dde79baa839700142c77e977540c205ce0c2ad68de8c67`
+- `.ws-bridge/evidence/gitinspect-phase42-native-qualification.json` — SHA256 `ebd8590f6e8de3f908e5511fb382d5da606a1247f0b631dc5cd86f9df3a95807`
+- `.ws-bridge/evidence/gitinspect-phase42-interaction.txt` — SHA256 `6fbcb239e3b4897eb3878b49bb24f8acef03b560e377087b081ee08c3c25256f`
+- `.ws-bridge/evidence/gitinspect-phase42-at-spi.txt` — SHA256 `6368e253a7d558f2d2dd2beded155b924b7988722af87e2a5ae09a0eecf42c9a`
+- `.ws-bridge/evidence/gitinspect-phase42-release-check.txt` — SHA256 `fe450b591e3469aef57e6f36f17b182bfce6b188232f5dfebb374d7e80387756`
+
+Original apply remains **NO-GO/unavailable**. No original-repository mutation command, capability, UI enablement, authorization widening, safety-case reopening, publish, deploy, tag, or release action was introduced.
+
 ## Next bounded tranche
 
-Phase 42 should durabilize the proven Phase-41 isolation recipe as a repository-owned, fail-closed release/operator qualification gate. It must discover/prove a genuinely unused controlled i3/X11 workspace or stop with an environment blocker, prove zero competing headed Gitinspect runners, wait for the exact WebGL-convergence readiness marker, perform at most one external Tauri handoff, record machine-checkable window/focus provenance, and require at least three unchanged strict native passes. It must never refocus continuously, disturb unrelated desktop windows, weaken projection/selection truth, substitute browser output, overclaim AT-SPI, or reopen original apply.
+Phase 43 should remain preview-only and treat `pnpm release:native-qualify` as the native release authority rather than recreating desktop shell history. Focus on adversarial qualification of the gate itself: prove its environment blockers against representative competing native/browser runners and workspace occupancy, tighten event provenance only if a concrete missed-transition case is demonstrated, and integrate the gate into any future candidate orchestration without making i3/X11 a false cross-platform packaging requirement. Preserve browser `nativeFpsClaim=false`, the AT-SPI read-only boundary, unchanged projection/selection truth, and original apply **NO-GO**.
