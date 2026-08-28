@@ -11,6 +11,7 @@ import {
 
 import { buildGitTopologyContext } from "../domain/gitTopology";
 import { createSyntheticGitHistory } from "../scale/synthetic";
+import type { GitMutationPreview } from "../transactions/gitMutationPreview";
 
 import {
   GraphViewport,
@@ -176,6 +177,103 @@ describe("GraphViewport Phase-5 projection wiring", () => {
     expect(html).toContain("Selected alpha, commit.");
     expect(html).not.toContain("viewport-node__core");
     expect(html).not.toContain('title="alpha"');
+  });
+
+  it("follows authoritative rewrite selection only while the preview is active", () => {
+    const oldOid = "1".repeat(40);
+    const newOid = "2".repeat(40);
+    const parentOid = "3".repeat(40);
+    const rewriteDataset: GraphDataset = {
+      revision: "viewport-rewrite-base",
+      nodes: [
+        {
+          id: `commit:${parentOid}`,
+          kind: "commit",
+          label: "parent",
+          properties: { oid: parentOid },
+        },
+        {
+          id: `commit:${oldOid}`,
+          kind: "commit",
+          label: "old subject",
+          properties: { oid: oldOid },
+        },
+      ],
+      edges: [
+        {
+          id: `history:${parentOid}:${oldOid}:0`,
+          source: `commit:${parentOid}`,
+          target: `commit:${oldOid}`,
+          kind: "history",
+          directed: true,
+          properties: { parentIndex: 0, firstParent: true },
+        },
+      ],
+    };
+    const preview: GitMutationPreview = {
+      sandboxId: "viewport-rewrite-sandbox",
+      transactionId: "viewport-rewrite-transaction",
+      baseRevision: rewriteDataset.revision,
+      operationDigest: `sha256:${"4".repeat(64)}`,
+      canonicalOperations: ["reword"],
+      before: { refs: [], commitCount: 2, truncated: false },
+      after: { refs: [], commitCount: 2, truncated: false },
+      changedRefs: [],
+      rewrittenCommits: [{ oldOid, newOid, operationIndex: 0 }],
+      hashCascade: [
+        {
+          oldOid,
+          newOid,
+          operationIndex: 0,
+          reason: "reword",
+          newParentOid: parentOid,
+        },
+      ],
+      droppedCommits: [],
+      graphDelta: {
+        commits: [
+          {
+            oid: newOid,
+            parents: [parentOid],
+            message: "rewritten subject",
+            authorName: "Preview Author",
+            authoredAtMs: 1,
+            committedAtMs: 2,
+          },
+        ],
+        refs: [],
+        truncated: false,
+      },
+      warnings: [],
+      failures: [],
+      success: true,
+      previewToken: "preview:viewport-rewrite",
+    };
+
+    const previewHtml = renderToStaticMarkup(
+      <GraphViewport
+        dataset={rewriteDataset}
+        selectedElementId={`commit:${oldOid}`}
+        search=""
+        mutationPreview={preview}
+        onSelect={() => undefined}
+      />,
+    );
+    expect(previewHtml).toContain("Selected rewritten subject, commit.");
+    expect(previewHtml).toContain("1 authoritative transformed commit node");
+    expect(previewHtml).not.toContain("Selected old subject, commit.");
+
+    const clearedHtml = renderToStaticMarkup(
+      <GraphViewport
+        dataset={rewriteDataset}
+        selectedElementId={`commit:${oldOid}`}
+        search=""
+        onSelect={() => undefined}
+      />,
+    );
+    expect(clearedHtml).toContain("Selected old subject, commit.");
+    expect(clearedHtml).toContain("No mutation preview active.");
+    expect(clearedHtml).not.toContain("Selected rewritten subject, commit.");
   });
 
   it("maps roving keyboard traversal deterministically and wraps visible node order", () => {

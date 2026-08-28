@@ -8,6 +8,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "build": "vite build",
+    "headed:mutation-preview:webgl": "node ./scripts/mutation-preview-headed-webgl.mjs",
     "lint": "biome lint .",
     "format": "biome format ."
   },

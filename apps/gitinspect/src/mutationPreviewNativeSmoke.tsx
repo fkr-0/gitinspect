@@ -1,4 +1,6 @@
 import { createRoot, type Root } from "react-dom/client";
+import type { GraphDataset } from "@gitinspect/graph-elements";
+
 import { GraphViewport } from "./components/GraphViewport";
 import { createSyntheticGitHistory } from "./scale/synthetic";
 import type { RepositorySession } from "./services/repository";
@@ -22,10 +24,19 @@ function percentile(values: readonly number[], ratio: number): number {
   return sorted[index] ?? 0;
 }
 
-async function sampleAnimationFrames(count: number): Promise<readonly number[]> {
+interface AnimationFrameEvidence {
+  readonly intervals: readonly number[];
+  readonly maxGapVisibilityState: DocumentVisibilityState;
+  readonly maxGapDocumentHasFocus: boolean;
+}
+
+async function sampleAnimationFrames(count: number): Promise<AnimationFrameEvidence> {
   return new Promise((resolve, reject) => {
     const intervals: number[] = [];
     let previous: number | undefined;
+    let maxGap = -1;
+    let maxGapVisibilityState = document.visibilityState;
+    let maxGapDocumentHasFocus = document.hasFocus();
     const timeout = window.setTimeout(() => {
       reject(
         new Error(
@@ -34,11 +45,19 @@ async function sampleAnimationFrames(count: number): Promise<readonly number[]> 
       );
     }, 15_000);
     const tick = (timestamp: number) => {
-      if (previous !== undefined) intervals.push(timestamp - previous);
+      if (previous !== undefined) {
+        const gap = timestamp - previous;
+        intervals.push(gap);
+        if (gap > maxGap) {
+          maxGap = gap;
+          maxGapVisibilityState = document.visibilityState;
+          maxGapDocumentHasFocus = document.hasFocus();
+        }
+      }
       previous = timestamp;
       if (intervals.length >= count) {
         window.clearTimeout(timeout);
-        resolve(intervals);
+        resolve({ intervals, maxGapVisibilityState, maxGapDocumentHasFocus });
         return;
       }
       requestAnimationFrame(tick);
@@ -56,12 +75,18 @@ function previewFrameFixture(
   commitCount: number,
   logicalCommitCount = 1_000,
 ): GitMutationPreview {
+  assert(commitCount > 0 && commitCount < logicalCommitCount, "headed rewrite fixture bounds are invalid");
+  const firstRewriteIndex = logicalCommitCount - commitCount;
+  const sourceOid = (index: number) => index.toString(16).padStart(40, "0");
   const rewritten = Array.from({ length: commitCount }, (_, index) => {
+    const oldOid = sourceOid(firstRewriteIndex + index);
     const oid = `${"f".repeat(32)}${index.toString(16).padStart(8, "0")}`;
-    const parent =
-      index === 0 ? undefined : `${"f".repeat(32)}${(index - 1).toString(16).padStart(8, "0")}`;
-    return { oid, parent };
+    const parent = index === 0 ? sourceOid(firstRewriteIndex - 1) : rewrittenOid(index - 1);
+    return { oldOid, oid, parent };
   });
+  function rewrittenOid(index: number): string {
+    return `${"f".repeat(32)}${index.toString(16).padStart(8, "0")}`;
+  }
   const lastRewritten = rewritten.at(-1);
   return {
     sandboxId: "gpu-frame-sandbox",
@@ -70,17 +95,17 @@ function previewFrameFixture(
     operationDigest: `sha256:${"f".repeat(64)}`,
     canonicalOperations: ["synthetic-headed-frame-transition"],
     before: { refs: [], commitCount: logicalCommitCount, truncated: false },
-    after: { refs: [], commitCount: logicalCommitCount + commitCount, truncated: false },
+    after: { refs: [], commitCount: logicalCommitCount, truncated: false },
     changedRefs: lastRewritten
       ? [{ name: "refs/heads/frame-preview", afterOid: lastRewritten.oid }]
       : [],
-    rewrittenCommits: rewritten.map((entry, index) => ({
-      oldOid: index.toString(16).padStart(40, "0"),
+    rewrittenCommits: rewritten.map((entry) => ({
+      oldOid: entry.oldOid,
       newOid: entry.oid,
       operationIndex: 0,
     })),
-    hashCascade: rewritten.map((entry, index) => ({
-      oldOid: index.toString(16).padStart(40, "0"),
+    hashCascade: rewritten.map((entry) => ({
+      oldOid: entry.oldOid,
       newOid: entry.oid,
       operationIndex: 0,
       reason: "frame-transition",
@@ -114,11 +139,30 @@ function previewFrameFixture(
   };
 }
 
+function createHeadedGraphFixture(commitCount: number): GraphDataset {
+  const synthetic = createSyntheticGitHistory(commitCount);
+  const semanticIds = new Map<string, string>();
+  for (const node of synthetic.nodes) {
+    const oid = node.kind === "commit" && typeof node.properties.oid === "string" ? node.properties.oid : undefined;
+    if (oid) semanticIds.set(node.id, `commit:${oid}`);
+  }
+  return {
+    revision: synthetic.revision,
+    nodes: synthetic.nodes.map((node) => ({ ...node, id: semanticIds.get(node.id) ?? node.id })),
+    edges: synthetic.edges.map((edge) => ({
+      ...edge,
+      source: semanticIds.get(edge.source) ?? edge.source,
+      target: semanticIds.get(edge.target) ?? edge.target,
+    })),
+  };
+}
+
 async function measureHeadedMutationPreviewFrames() {
   window.focus();
   const logicalCommitCount = 1_000;
   const previewCommitCount = 32;
-  const dataset = createSyntheticGitHistory(logicalCommitCount);
+  const dataset = createHeadedGraphFixture(logicalCommitCount);
+  const preview = previewFrameFixture(dataset.revision, previewCommitCount, logicalCommitCount);
   const host = document.createElement("div");
   host.style.width = "1280px";
   host.style.height = "720px";
@@ -127,9 +171,9 @@ async function measureHeadedMutationPreviewFrames() {
   host.style.zIndex = "9999";
   document.body.append(host);
   const graphRoot = createRoot(host);
-  const initialSelectedId = dataset.nodes.find((node) => node.kind === "commit")?.id;
-  assert(initialSelectedId, "headed frame fixture has no commit to select");
-  let selectedElementId: string | undefined = initialSelectedId;
+  const selectedRewrite = preview.rewrittenCommits.at(-1);
+  assert(selectedRewrite, "headed frame fixture has no rewritten commit to select");
+  let selectedElementId: string | undefined = `commit:${selectedRewrite.oldOid}`;
   let renderedPreview: GitMutationPreview | undefined;
   const search = "";
   const render = (mutationPreview = renderedPreview) => {
@@ -162,10 +206,34 @@ async function measureHeadedMutationPreviewFrames() {
     gl.getParameter(debugInfo ? debugInfo.UNMASKED_RENDERER_WEBGL : gl.RENDERER),
   );
 
+  let frameVisibilityChanges = 0;
+  let frameWindowFocusEvents = 0;
+  let frameWindowBlurEvents = 0;
+  let schedulingListenersActive = false;
+  const onVisibilityChange = () => {
+    frameVisibilityChanges += 1;
+  };
+  const onWindowFocus = () => {
+    frameWindowFocusEvents += 1;
+  };
+  const onWindowBlur = () => {
+    frameWindowBlurEvents += 1;
+  };
+
   try {
+    window.focus();
+    await waitFor(
+      "visible focused headed frame window",
+      () => document.visibilityState === "visible" && document.hasFocus(),
+      5_000,
+    );
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", onWindowFocus);
+    window.addEventListener("blur", onWindowBlur);
+    schedulingListenersActive = true;
+
     await sampleAnimationFrames(30);
-    const baseline = await sampleAnimationFrames(90);
-    const preview = previewFrameFixture(dataset.revision, previewCommitCount);
+    const baselineEvidence = await sampleAnimationFrames(90);
     const transitionFrames = sampleAnimationFrames(120);
     const transitionRequestedAt = performance.now();
     render(preview);
@@ -177,7 +245,9 @@ async function measureHeadedMutationPreviewFrames() {
       30_000,
     );
     const topologyCommitLatencyMs = performance.now() - transitionRequestedAt;
-    const transition = await transitionFrames;
+    const transitionEvidence = await transitionFrames;
+    const baseline = baselineEvidence.intervals;
+    const transition = transitionEvidence.intervals;
 
     return {
       frameRenderer,
@@ -192,6 +262,13 @@ async function measureHeadedMutationPreviewFrames() {
       frameTransitionMaxMs: rounded(Math.max(...transition)),
       frameTransitionOver16_7Ms: transition.filter((value) => value > 16.7).length,
       topologyCommitLatencyMs: rounded(topologyCommitLatencyMs),
+      frameVisibilityState: document.visibilityState,
+      frameDocumentHasFocus: document.hasFocus(),
+      frameVisibilityChanges,
+      frameWindowFocusEvents,
+      frameWindowBlurEvents,
+      frameMaxGapVisibilityState: transitionEvidence.maxGapVisibilityState,
+      frameMaxGapDocumentHasFocus: transitionEvidence.maxGapDocumentHasFocus,
     };
   } catch (error: unknown) {
     return {
@@ -207,8 +284,20 @@ async function measureHeadedMutationPreviewFrames() {
       frameTransitionMaxMs: 0,
       frameTransitionOver16_7Ms: 0,
       topologyCommitLatencyMs: 0,
+      frameVisibilityState: document.visibilityState,
+      frameDocumentHasFocus: document.hasFocus(),
+      frameVisibilityChanges,
+      frameWindowFocusEvents,
+      frameWindowBlurEvents,
+      frameMaxGapVisibilityState: document.visibilityState,
+      frameMaxGapDocumentHasFocus: document.hasFocus(),
     };
   } finally {
+    if (schedulingListenersActive) {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", onWindowFocus);
+      window.removeEventListener("blur", onWindowBlur);
+    }
     graphRoot.unmount();
     host.remove();
   }
@@ -217,7 +306,7 @@ async function measureHeadedMutationPreviewFrames() {
 async function verifyHeadedTransformedTopologyAccessibility() {
   const logicalCommitCount = 1_000;
   const previewCommitCount = 4;
-  const dataset = createSyntheticGitHistory(logicalCommitCount);
+  const dataset = createHeadedGraphFixture(logicalCommitCount);
   const preview = previewFrameFixture(dataset.revision, previewCommitCount, logicalCommitCount);
   const host = document.createElement("div");
   host.style.width = "1280px";
@@ -227,9 +316,9 @@ async function verifyHeadedTransformedTopologyAccessibility() {
   host.style.zIndex = "9999";
   document.body.append(host);
   const root = createRoot(host);
-  const authoritativeSelectedOid = preview.graphDelta.commits[0]?.oid;
-  assert(authoritativeSelectedOid, "headed accessibility fixture has no authoritative commit");
-  let selectedElementId: string | undefined = `commit:${authoritativeSelectedOid}`;
+  const selectedRewrite = preview.rewrittenCommits[0];
+  assert(selectedRewrite, "headed accessibility fixture has no rewrite lineage");
+  let selectedElementId: string | undefined = `commit:${selectedRewrite.oldOid}`;
   const render = () => {
     root.render(
       <GraphViewport
@@ -367,6 +456,13 @@ interface SmokeReport {
   readonly frameTransitionMaxMs: number;
   readonly frameTransitionOver16_7Ms: number;
   readonly topologyCommitLatencyMs: number;
+  readonly frameVisibilityState: string;
+  readonly frameDocumentHasFocus: boolean;
+  readonly frameVisibilityChanges: number;
+  readonly frameWindowFocusEvents: number;
+  readonly frameWindowBlurEvents: number;
+  readonly frameMaxGapVisibilityState: string;
+  readonly frameMaxGapDocumentHasFocus: boolean;
   readonly frameAccessibilityLive: boolean;
   readonly frameAccessibilityPressed: boolean;
   readonly frameAccessibilityRoving: boolean;
@@ -960,6 +1056,13 @@ void run().catch(async (error: unknown) => {
     frameTransitionMaxMs: 0,
     frameTransitionOver16_7Ms: 0,
     topologyCommitLatencyMs: 0,
+    frameVisibilityState: document.visibilityState,
+    frameDocumentHasFocus: document.hasFocus(),
+    frameVisibilityChanges: 0,
+    frameWindowFocusEvents: 0,
+    frameWindowBlurEvents: 0,
+    frameMaxGapVisibilityState: document.visibilityState,
+    frameMaxGapDocumentHasFocus: document.hasFocus(),
     frameAccessibilityLive: false,
     frameAccessibilityPressed: false,
     frameAccessibilityRoving: false,

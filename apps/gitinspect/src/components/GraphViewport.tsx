@@ -44,6 +44,7 @@ import {
   createMutationPreviewMapper,
   gitMutationPreviewAffectedIds,
   mutationPreviewGraphDataset,
+  mutationPreviewSelectionId,
 } from "../transactions/mutationPreviewVisual";
 import type { ViewportTopologyFitRequest } from "./ViewportCameraBridge";
 import {
@@ -362,6 +363,10 @@ export function GraphViewport({
     () => mutationPreviewGraphDataset(dataset, mutationPreview),
     [dataset, mutationPreview],
   );
+  const effectiveSelectedElementId = useMemo(
+    () => mutationPreviewSelectionId(dataset?.revision, selectedElementId, mutationPreview),
+    [dataset?.revision, mutationPreview, selectedElementId],
+  );
   const semanticInteractionEnabled = pointerMode === "cursor";
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const filterKey = viewportSearchFilterKey(filters);
@@ -396,8 +401,10 @@ export function GraphViewport({
   const [lodCameraPosition, setLodCameraPosition] = useState<Vec3>(cameraState.position);
   const topologyContext = useMemo(
     () =>
-      viewportDataset ? buildGitTopologyContext(viewportDataset, selectedElementId) : undefined,
-    [selectedElementId, viewportDataset],
+      viewportDataset
+        ? buildGitTopologyContext(viewportDataset, effectiveSelectedElementId)
+        : undefined,
+    [effectiveSelectedElementId, viewportDataset],
   );
   useEffect(() => {
     const position: Vec3 = [...cameraState.position];
@@ -415,7 +422,9 @@ export function GraphViewport({
         ? { search: { text: normalizedSearch, mode: "substring" as const, limit: 200 } }
         : {}),
       ...(effectiveFilters ? { filters: effectiveFilters } : {}),
-      ...(selectedElementId ? { selectedIds: new Set([selectedElementId]) } : {}),
+      ...(effectiveSelectedElementId
+        ? { selectedIds: new Set([effectiveSelectedElementId]) }
+        : {}),
       ...(hoveredElementId ? { hoveredIds: new Set([hoveredElementId]) } : {}),
     });
   }, [
@@ -423,7 +432,7 @@ export function GraphViewport({
     hoveredElementId,
     lodCameraPosition,
     normalizedSearch,
-    selectedElementId,
+    effectiveSelectedElementId,
     viewportDataset,
   ]);
   const reportedSearchResults = viewportSearchResults(
@@ -476,17 +485,21 @@ export function GraphViewport({
     const interactions = interactionManagerRef.current;
     if (!picks || !interactions) return;
     const exists =
-      selectedElementId === undefined
+      effectiveSelectedElementId === undefined
         ? false
-        : viewportDataset?.nodes.some((node) => node.id === selectedElementId) === true;
-    syncViewportInteractionSelection(picks, interactions, exists ? selectedElementId : undefined);
-  }, [selectedElementId, viewportDataset]);
+        : viewportDataset?.nodes.some((node) => node.id === effectiveSelectedElementId) === true;
+    syncViewportInteractionSelection(
+      picks,
+      interactions,
+      exists ? effectiveSelectedElementId : undefined,
+    );
+  }, [effectiveSelectedElementId, viewportDataset]);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (editableEventTarget(event.target)) return;
       const shortcut = viewportContextShortcut(event);
-      if (shortcut === undefined || selectedElementId === undefined) return;
+      if (shortcut === undefined || effectiveSelectedElementId === undefined) return;
       const interactions = interactionManagerRef.current;
       if (!interactions?.getSelection()) return;
       event.preventDefault();
@@ -499,7 +512,7 @@ export function GraphViewport({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedElementId]);
+  }, [effectiveSelectedElementId]);
   useEffect(() => {
     if (!semanticInteractionEnabled) interactionManagerRef.current?.clearHover();
   }, [semanticInteractionEnabled]);
@@ -579,19 +592,20 @@ export function GraphViewport({
       return undefined;
     }
     const selectionChanged =
-      selectedElementId !== undefined && cameraState.attachedNodeId !== selectedElementId;
+      effectiveSelectedElementId !== undefined &&
+      cameraState.attachedNodeId !== effectiveSelectedElementId;
     if (!isInheritedCinematicCamera(cameraState) && !selectionChanged) return undefined;
     const overview = model.scale.layoutBounds;
     const focus =
-      selectedElementId && topologyContext
+      effectiveSelectedElementId && topologyContext
         ? gitCameraBoundsForPositions(nodePositions, topologyContext.focusNodeIds)
         : undefined;
     const bounds = focus ? contextualGitCameraBounds(overview, focus) : overview;
     return Object.freeze({
-      key: `${viewportDataset.revision}:${selectedElementId ?? "overview"}`,
+      key: `${viewportDataset.revision}:${effectiveSelectedElementId ?? "overview"}`,
       bounds,
-      ...(selectedElementId !== undefined && nodePositions.has(selectedElementId)
-        ? { targetElementId: selectedElementId }
+      ...(effectiveSelectedElementId !== undefined && nodePositions.has(effectiveSelectedElementId)
+        ? { targetElementId: effectiveSelectedElementId }
         : {}),
     });
   }, [
@@ -599,7 +613,7 @@ export function GraphViewport({
     cameraState,
     model,
     nodePositions,
-    selectedElementId,
+    effectiveSelectedElementId,
     topologyContext,
     viewportDataset,
   ]);
@@ -618,7 +632,7 @@ export function GraphViewport({
             renderDataset.nodes,
             nodePositions,
             lodCameraPosition,
-            selectedElementId,
+            effectiveSelectedElementId,
             hoveredElementId,
             model?.highlights.hitIds ?? EMPTY_IDS,
             topologyContext,
@@ -630,7 +644,7 @@ export function GraphViewport({
       model,
       nodePositions,
       renderDataset,
-      selectedElementId,
+      effectiveSelectedElementId,
       topologyContext,
     ],
   );
@@ -658,10 +672,11 @@ export function GraphViewport({
   const rovingTabStopId = useMemo(() => {
     if (interactiveOverlayNodes.length === 0) return undefined;
     const selectedRenderNode = interactiveOverlayNodes.find(
-      (node) => resolveViewportSelection(node.id, aggregateDrillTargets) === selectedElementId,
+      (node) =>
+        resolveViewportSelection(node.id, aggregateDrillTargets) === effectiveSelectedElementId,
     );
     return selectedRenderNode?.id ?? interactiveOverlayNodes[0]?.id;
-  }, [aggregateDrillTargets, interactiveOverlayNodes, selectedElementId]);
+  }, [aggregateDrillTargets, effectiveSelectedElementId, interactiveOverlayNodes]);
   useEffect(() => {
     const pendingFocusId = pendingKeyboardFocusIdRef.current;
     if (pendingFocusId === undefined) return;
@@ -713,11 +728,13 @@ export function GraphViewport({
           viewportDataset,
         )
       : undefined;
-  const selectedAccessibleNode = viewportDataset?.nodes.find((node) => node.id === selectedElementId);
+  const selectedAccessibleNode = viewportDataset?.nodes.find(
+    (node) => node.id === effectiveSelectedElementId,
+  );
   const selectedAccessibleSummary = selectedAccessibleNode
     ? `Selected ${selectedAccessibleNode.label ?? selectedAccessibleNode.id}, ${selectedAccessibleNode.kind}.`
-    : selectedElementId
-      ? `Selected ${selectedElementId}.`
+    : effectiveSelectedElementId
+      ? `Selected ${effectiveSelectedElementId}.`
       : "No graph node selected.";
   const visibleMutationAffectedCount = viewportDataset
     ? viewportDataset.nodes.reduce(
@@ -767,7 +784,7 @@ export function GraphViewport({
             cameraState={cameraState}
             cameraMode={cameraMode}
             pointerMode={pointerMode}
-            selectedElementId={selectedElementId}
+            selectedElementId={effectiveSelectedElementId}
             projectedLabelIds={projectedLabelIds}
             visibilityRange={visibilityRange}
             {...(topologyFit === undefined ? {} : { topologyFit })}
@@ -829,7 +846,7 @@ export function GraphViewport({
         const projected = projectedLabelPoints.get(node.id);
         if (!projected) return null;
         const logicalElementId = resolveViewportSelection(node.id, aggregateDrillTargets);
-        const selected = logicalElementId === selectedElementId;
+        const selected = logicalElementId === effectiveSelectedElementId;
         const hovered = logicalElementId === hoveredElementId;
         const mutationAffected = mutationAffectedIds.has(logicalElementId) || mutationAffectedIds.has(node.id);
         const matches =

@@ -7,13 +7,14 @@ import {
   createMutationPreviewMapper,
   gitMutationPreviewAffectedIds,
   mutationPreviewGraphDataset,
+  mutationPreviewSelectionId,
 } from "./mutationPreviewVisual";
 
-function preview(): GitMutationPreview {
+function preview(baseRevision = "base-revision"): GitMutationPreview {
   return {
     sandboxId: "sandbox-visual",
     transactionId: "tx-visual",
-    baseRevision: `sha256:${"a".repeat(64)}`,
+    baseRevision,
     operationDigest: `sha256:${"b".repeat(64)}`,
     canonicalOperations: ["tag-move", "rebase-reorder"],
     before: { refs: [], commitCount: 2, truncated: false },
@@ -126,7 +127,7 @@ describe("mutation preview visualization", () => {
       edges: [],
     };
 
-    const transformed = mutationPreviewGraphDataset(dataset, preview());
+    const transformed = mutationPreviewGraphDataset(dataset, preview("base-existing-commit"));
     const commit = transformed?.nodes.find((node) => node.id === `commit:${oid}`);
     expect(commit).toMatchObject({
       id: `commit:${oid}`,
@@ -152,7 +153,7 @@ describe("mutation preview visualization", () => {
     const targetOid = "7".repeat(40);
     const deletedRef = "refs/heads/obsolete";
     const deletionPreview: GitMutationPreview = {
-      ...preview(),
+      ...preview("base-ref-delete"),
       operationDigest: `sha256:${"d".repeat(64)}`,
       canonicalOperations: ["branch-delete"],
       changedRefs: [{ name: deletedRef, beforeOid: targetOid }],
@@ -201,6 +202,232 @@ describe("mutation preview visualization", () => {
       ),
     ).toBe(false);
     expect(transformed?.revision).toContain(deletionPreview.operationDigest);
+  });
+
+  it("retires complete authoritative rewrite identities, records lineage, and follows unique selection without stale edges", () => {
+    const oldOid = "3".repeat(40);
+    const newOid = "4".repeat(40);
+    const parentOid = "5".repeat(40);
+    const parentNode = { id: `commit:${parentOid}`, kind: "commit", label: "parent", properties: {} };
+    const dataset: GraphDataset = {
+      revision: "base-revision",
+      nodes: [
+        parentNode,
+        { id: `commit:${oldOid}`, kind: "commit", label: "old", properties: { oid: oldOid } },
+        {
+          id: "ref:refs/tags/release",
+          kind: "tag",
+          label: "release",
+          properties: { name: "refs/tags/release", targetOid: oldOid },
+        },
+      ],
+      edges: [
+        {
+          id: `history:${parentOid}:${oldOid}:0`,
+          source: `commit:${parentOid}`,
+          target: `commit:${oldOid}`,
+          kind: "history",
+          directed: true,
+          properties: {},
+        },
+        {
+          id: "ref-target:refs/tags/release",
+          source: "ref:refs/tags/release",
+          target: `commit:${oldOid}`,
+          kind: "tag-target",
+          directed: true,
+          properties: {},
+        },
+      ],
+    };
+
+    const transformed = mutationPreviewGraphDataset(dataset, preview());
+    expect(transformed?.nodes.some((node) => node.id === `commit:${oldOid}`)).toBe(false);
+    const rewritten = transformed?.nodes.find((node) => node.id === `commit:${newOid}`);
+    expect(rewritten?.properties).toMatchObject({
+      mutationPreviewAuthoritative: true,
+      mutationPreviewLineageOldOids: [oldOid],
+    });
+    expect(transformed?.nodes.find((node) => node.id === `commit:${parentOid}`)).toBe(parentNode);
+    expect(
+      transformed?.edges.some((edge) => edge.source === `commit:${oldOid}` || edge.target === `commit:${oldOid}`),
+    ).toBe(false);
+    expect(transformed?.edges).toContainEqual(
+      expect.objectContaining({
+        id: "ref-target:refs/tags/release",
+        source: "ref:refs/tags/release",
+        target: `commit:${newOid}`,
+      }),
+    );
+    expect(mutationPreviewSelectionId(dataset.revision, `commit:${oldOid}`, preview())).toBe(
+      `commit:${newOid}`,
+    );
+    expect(mutationPreviewSelectionId(dataset.revision, `commit:${parentOid}`, preview())).toBe(
+      `commit:${parentOid}`,
+    );
+  });
+
+  it("fails closed for truncated, conflicted, stale, split, and dropped selection continuity", () => {
+    const oldOid = "3".repeat(40);
+    const newOid = "4".repeat(40);
+    const secondNewOid = "8".repeat(40);
+    const parentOid = "5".repeat(40);
+    const oldId = `commit:${oldOid}`;
+    const dataset: GraphDataset = {
+      revision: "base-revision",
+      nodes: [
+        { id: `commit:${parentOid}`, kind: "commit", label: "parent", properties: {} },
+        { id: oldId, kind: "commit", label: "old", properties: { oid: oldOid } },
+      ],
+      edges: [
+        {
+          id: `history:${parentOid}:${oldOid}:0`,
+          source: `commit:${parentOid}`,
+          target: oldId,
+          kind: "history",
+          directed: true,
+          properties: {},
+        },
+      ],
+    };
+    const truncated: GitMutationPreview = {
+      ...preview(),
+      graphDelta: { ...preview().graphDelta, truncated: true },
+    };
+    const truncatedDataset = mutationPreviewGraphDataset(dataset, truncated);
+    expect(truncatedDataset?.nodes.some((node) => node.id === oldId)).toBe(true);
+    expect(truncatedDataset?.nodes.some((node) => node.id === `commit:${newOid}`)).toBe(true);
+    expect(mutationPreviewSelectionId(dataset.revision, oldId, truncated)).toBe(oldId);
+
+    const conflicted: GitMutationPreview = {
+      ...preview(),
+      success: false,
+      failures: [
+        {
+          operationIndex: 0,
+          operationKind: "rebase-reorder",
+          code: "conflict",
+          message: "fixture conflict",
+          conflicts: ["conflict.txt"],
+        },
+      ],
+    };
+    expect(mutationPreviewGraphDataset(dataset, conflicted)).toBe(dataset);
+    expect(mutationPreviewSelectionId(dataset.revision, oldId, conflicted)).toBe(oldId);
+
+    const stale = preview("stale-base-revision");
+    expect(mutationPreviewGraphDataset(dataset, stale)).toBe(dataset);
+    expect(mutationPreviewSelectionId(dataset.revision, oldId, stale)).toBe(oldId);
+
+    const splitPreview: GitMutationPreview = {
+      ...preview(),
+      canonicalOperations: ["split"],
+      rewrittenCommits: [
+        { oldOid, newOid, operationIndex: 0 },
+        { oldOid, newOid: secondNewOid, operationIndex: 0 },
+      ],
+      hashCascade: [],
+      graphDelta: {
+        commits: [
+          ...preview().graphDelta.commits,
+          {
+            oid: secondNewOid,
+            parents: [newOid],
+            message: "split second",
+            authorName: "Preview Author",
+            authoredAtMs: 3,
+            committedAtMs: 4,
+          },
+        ],
+        refs: [],
+        truncated: false,
+      },
+    };
+    const splitDataset = mutationPreviewGraphDataset(dataset, splitPreview);
+    expect(splitDataset?.nodes.some((node) => node.id === oldId)).toBe(false);
+    expect(splitDataset?.nodes.some((node) => node.id === `commit:${newOid}`)).toBe(true);
+    expect(splitDataset?.nodes.some((node) => node.id === `commit:${secondNewOid}`)).toBe(true);
+    expect(mutationPreviewSelectionId(dataset.revision, oldId, splitPreview)).toBeUndefined();
+
+    const droppedPreview: GitMutationPreview = {
+      ...preview(),
+      canonicalOperations: ["drop"],
+      rewrittenCommits: [],
+      hashCascade: [],
+      droppedCommits: [{ oldOid, operationIndex: 0 }],
+      graphDelta: { commits: [], refs: [], truncated: false },
+    };
+    const droppedDataset = mutationPreviewGraphDataset(dataset, droppedPreview);
+    expect(droppedDataset?.nodes.some((node) => node.id === oldId)).toBe(false);
+    expect(mutationPreviewSelectionId(dataset.revision, oldId, droppedPreview)).toBeUndefined();
+  });
+
+  it("replaces a bounded 64-commit rewrite suffix in a 4096-node fixture without stale or fabricated topology", () => {
+    const logicalCount = 4_096;
+    const rewriteCount = 64;
+    const oid = (index: number) => index.toString(16).padStart(40, "0");
+    const newOid = (index: number) => `${"f".repeat(32)}${index.toString(16).padStart(8, "0")}`;
+    const nodes = Array.from({ length: logicalCount }, (_, index) => ({
+      id: `commit:${oid(index)}`,
+      kind: "commit",
+      label: `commit ${index}`,
+      properties: { oid: oid(index) },
+    }));
+    const edges = Array.from({ length: logicalCount - 1 }, (_, index) => ({
+      id: `history:${oid(index)}:${oid(index + 1)}:0`,
+      source: `commit:${oid(index)}`,
+      target: `commit:${oid(index + 1)}`,
+      kind: "history",
+      directed: true,
+      properties: {},
+    }));
+    const dataset: GraphDataset = { revision: "large-base", nodes, edges };
+    const firstRewrite = logicalCount - rewriteCount;
+    const rewrites = Array.from({ length: rewriteCount }, (_, offset) => ({
+      oldOid: oid(firstRewrite + offset),
+      newOid: newOid(offset),
+      operationIndex: 0,
+    }));
+    const largePreview: GitMutationPreview = {
+      ...preview("large-base"),
+      before: { refs: [], commitCount: logicalCount, truncated: false },
+      after: { refs: [], commitCount: logicalCount, truncated: false },
+      changedRefs: [],
+      rewrittenCommits: rewrites,
+      hashCascade: [],
+      droppedCommits: [],
+      graphDelta: {
+        commits: rewrites.map((rewrite, offset) => ({
+          oid: rewrite.newOid,
+          parents: [offset === 0 ? oid(firstRewrite - 1) : newOid(offset - 1)],
+          message: `rewritten ${offset}`,
+          authorName: "Large Fixture",
+          authoredAtMs: offset,
+          committedAtMs: offset,
+        })),
+        refs: [],
+        truncated: false,
+      },
+    };
+
+    const transformed = mutationPreviewGraphDataset(dataset, largePreview);
+    expect(transformed?.nodes).toHaveLength(logicalCount);
+    expect(transformed?.edges).toHaveLength(logicalCount - 1);
+    for (const rewrite of rewrites) {
+      expect(transformed?.nodes.some((node) => node.id === `commit:${rewrite.oldOid}`)).toBe(false);
+      expect(transformed?.nodes.some((node) => node.id === `commit:${rewrite.newOid}`)).toBe(true);
+    }
+    const retiredIds = new Set(rewrites.map((rewrite) => `commit:${rewrite.oldOid}`));
+    expect(
+      transformed?.edges.some((edge) => retiredIds.has(edge.source) || retiredIds.has(edge.target)),
+    ).toBe(false);
+    expect(
+      mutationPreviewSelectionId(
+        dataset.revision,
+        `commit:${rewrites[rewriteCount - 1]!.oldOid}`,
+        largePreview,
+      ),
+    ).toBe(`commit:${rewrites[rewriteCount - 1]!.newOid}`);
   });
 
   it("decorates only affected 3D node descriptors and preserves semantic IDs", () => {

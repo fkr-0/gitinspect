@@ -177,6 +177,13 @@ struct SmokeReport {
     #[serde(rename = "frameTransitionOver16_7Ms")]
     frame_transition_over16_7_ms: usize,
     topology_commit_latency_ms: f64,
+    frame_visibility_state: String,
+    frame_document_has_focus: bool,
+    frame_visibility_changes: usize,
+    frame_window_focus_events: usize,
+    frame_window_blur_events: usize,
+    frame_max_gap_visibility_state: String,
+    frame_max_gap_document_has_focus: bool,
     frame_accessibility_live: bool,
     frame_accessibility_pressed: bool,
     frame_accessibility_roving: bool,
@@ -331,6 +338,24 @@ fn mutation_preview_native_smoke_complete(
             || report.topology_commit_latency_ms <= 0.0
         {
             failures.push("headed frame timing evidence contained non-positive samples".to_owned());
+        }
+        if report.frame_visibility_state != "visible"
+            || !report.frame_document_has_focus
+            || report.frame_max_gap_visibility_state != "visible"
+            || !report.frame_max_gap_document_has_focus
+            || report.frame_visibility_changes != 0
+            || report.frame_window_blur_events != 0
+        {
+            failures.push(format!(
+                "headed frame visibility/focus was not stable: final_visibility={}, final_focus={}, visibility_changes={}, focus_events={}, blur_events={}, max_gap_visibility={}, max_gap_focus={}",
+                report.frame_visibility_state,
+                report.frame_document_has_focus,
+                report.frame_visibility_changes,
+                report.frame_window_focus_events,
+                report.frame_window_blur_events,
+                report.frame_max_gap_visibility_state,
+                report.frame_max_gap_document_has_focus
+            ));
         }
     } else if report.frame_samples != 0 {
         failures.push(format!(
@@ -657,6 +682,13 @@ fn format_report(report: &SmokeReport, failures: &[String]) -> String {
             "frame_transition_max_ms={}\n",
             "frame_transition_over16_7_ms={}\n",
             "topology_commit_latency_ms={}\n",
+            "frame_visibility_state={}\n",
+            "frame_document_has_focus={}\n",
+            "frame_visibility_changes={}\n",
+            "frame_window_focus_events={}\n",
+            "frame_window_blur_events={}\n",
+            "frame_max_gap_visibility_state={}\n",
+            "frame_max_gap_document_has_focus={}\n",
             "frame_accessibility_live={}\n",
             "frame_accessibility_pressed={}\n",
             "frame_accessibility_roving={}\n",
@@ -696,6 +728,13 @@ fn format_report(report: &SmokeReport, failures: &[String]) -> String {
         report.frame_transition_max_ms,
         report.frame_transition_over16_7_ms,
         report.topology_commit_latency_ms,
+        clean(&report.frame_visibility_state),
+        report.frame_document_has_focus,
+        report.frame_visibility_changes,
+        report.frame_window_focus_events,
+        report.frame_window_blur_events,
+        clean(&report.frame_max_gap_visibility_state),
+        report.frame_max_gap_document_has_focus,
         report.frame_accessibility_live,
         report.frame_accessibility_pressed,
         report.frame_accessibility_roving,

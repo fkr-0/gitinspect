@@ -73,6 +73,75 @@ function refLabel(name: string): string {
   return name.replace(/^refs\/(heads|remotes|tags)\//, "");
 }
 
+interface MutationPreviewContinuity {
+  readonly complete: boolean;
+  readonly successorsByOldOid: ReadonlyMap<string, readonly string[]>;
+  readonly oldOidsByNewOid: ReadonlyMap<string, readonly string[]>;
+  readonly droppedOldOids: ReadonlySet<string>;
+}
+
+function mutationPreviewContinuity(
+  datasetRevision: string,
+  preview: GitMutationPreview | undefined,
+): MutationPreviewContinuity {
+  const successors = new Map<string, Set<string>>();
+  const predecessors = new Map<string, Set<string>>();
+  const dropped = new Set<string>();
+  if (!preview?.success || preview.baseRevision !== datasetRevision) {
+    return {
+      complete: false,
+      successorsByOldOid: new Map(),
+      oldOidsByNewOid: new Map(),
+      droppedOldOids: dropped,
+    };
+  }
+
+  const authoritativeNewOids = new Set(preview.graphDelta.commits.map((commit) => commit.oid));
+  for (const rewrite of preview.rewrittenCommits) {
+    if (!authoritativeNewOids.has(rewrite.newOid) || rewrite.oldOid === rewrite.newOid) continue;
+    const oldSuccessors = successors.get(rewrite.oldOid) ?? new Set<string>();
+    oldSuccessors.add(rewrite.newOid);
+    successors.set(rewrite.oldOid, oldSuccessors);
+    const newPredecessors = predecessors.get(rewrite.newOid) ?? new Set<string>();
+    newPredecessors.add(rewrite.oldOid);
+    predecessors.set(rewrite.newOid, newPredecessors);
+  }
+  for (const entry of preview.droppedCommits) dropped.add(entry.oldOid);
+
+  const freezeMap = (source: ReadonlyMap<string, Set<string>>) =>
+    new Map(
+      [...source].map(([oid, values]) => [oid, [...values].sort((left, right) => left.localeCompare(right))] as const),
+    );
+  return {
+    complete: !preview.graphDelta.truncated,
+    successorsByOldOid: freezeMap(successors),
+    oldOidsByNewOid: freezeMap(predecessors),
+    droppedOldOids: dropped,
+  };
+}
+
+/**
+ * Resolve only an unambiguous, complete authoritative rewrite successor for temporary preview
+ * selection. Split (1->N), drop, conflicts, stale previews, and truncated deltas deliberately clear
+ * or retain selection rather than guessing a target. The caller's durable selection is not mutated.
+ */
+export function mutationPreviewSelectionId(
+  datasetRevision: string | undefined,
+  selectedElementId: ElementId | undefined,
+  preview: GitMutationPreview | undefined,
+): ElementId | undefined {
+  if (!datasetRevision || !selectedElementId || !preview) return selectedElementId;
+  const prefix = "commit:";
+  if (!selectedElementId.startsWith(prefix)) return selectedElementId;
+  const continuity = mutationPreviewContinuity(datasetRevision, preview);
+  if (!continuity.complete) return selectedElementId;
+  const oldOid = selectedElementId.slice(prefix.length);
+  if (continuity.droppedOldOids.has(oldOid)) return undefined;
+  const successors = continuity.successorsByOldOid.get(oldOid);
+  if (!successors) return selectedElementId;
+  return successors.length === 1 ? `commit:${successors[0]}` : undefined;
+}
+
 /**
  * Merge only backend-authored preview graph evidence into the live graph. Missing objects remain
  * untouched and continue to use the Phase-36 highlight fallback; no guessed commit/ref is created.
@@ -82,14 +151,22 @@ export function mutationPreviewGraphDataset(
   preview: GitMutationPreview | undefined,
 ): GraphDataset | undefined {
   if (!dataset || !preview) return dataset;
+  if (!preview.success || preview.baseRevision !== dataset.revision) return dataset;
 
-  const deletedRefNames = preview.changedRefs
-    .filter((change) => change.beforeOid !== undefined && change.afterOid === undefined)
-    .map((change) => change.name);
+  const continuity = mutationPreviewContinuity(dataset.revision, preview);
+  const deletedRefNames = continuity.complete
+    ? preview.changedRefs
+        .filter((change) => change.beforeOid !== undefined && change.afterOid === undefined)
+        .map((change) => change.name)
+    : [];
+  const hasRetiredObjects =
+    continuity.complete &&
+    (continuity.successorsByOldOid.size > 0 || continuity.droppedOldOids.size > 0);
   if (
     preview.graphDelta.commits.length === 0 &&
     preview.graphDelta.refs.length === 0 &&
-    deletedRefNames.length === 0
+    deletedRefNames.length === 0 &&
+    !hasRetiredObjects
   ) {
     return dataset;
   }
@@ -97,6 +174,21 @@ export function mutationPreviewGraphDataset(
   const nodes = new Map(dataset.nodes.map((node) => [node.id, node] as const));
   const edges = new Map(dataset.edges.map((edge) => [edge.id, edge] as const));
   const authoritativeCommitOids = new Set(preview.graphDelta.commits.map((commit) => commit.oid));
+
+  if (continuity.complete) {
+    const retiredOids = new Set([
+      ...continuity.successorsByOldOid.keys(),
+      ...continuity.droppedOldOids,
+    ]);
+    for (const oid of retiredOids) {
+      for (const id of [`commit:${oid}`, `commit-boundary:${oid}`, `object:${oid}`]) {
+        if (!nodes.delete(id)) continue;
+        for (const [edgeId, edge] of edges) {
+          if (edge.source === id || edge.target === id) edges.delete(edgeId);
+        }
+      }
+    }
+  }
 
   for (const name of deletedRefNames) {
     const refId = `ref:${name}`;
@@ -143,6 +235,9 @@ export function mutationPreviewGraphDataset(
         message: commit.message,
         isMerge: commit.parents.length > 1,
         mutationPreviewAuthoritative: true,
+        ...(continuity.oldOidsByNewOid.get(commit.oid)
+          ? { mutationPreviewLineageOldOids: continuity.oldOidsByNewOid.get(commit.oid) }
+          : {}),
       },
     });
   }
