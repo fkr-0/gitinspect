@@ -647,9 +647,9 @@ run_cleanup_fixture_child() {
   active_alive_file="$runtime_dir/monitor-alive"
   touch "$active_alive_file"
 
-  setsid bash -c 'sleep 300 & wait "$!"' &
+  bash -c 'sleep 300 & wait "$!"' &
   active_run_pid=$!
-  setsid bash -c 'sleep 300 & wait "$!"' &
+  bash -c 'sleep 300 & wait "$!"' &
   active_monitor_pid=$!
   # The positional parameters are intentionally expanded by the child shell.
   # shellcheck disable=SC2016
