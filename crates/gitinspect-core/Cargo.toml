@@ -9,12 +9,10 @@ publish = false
 gix = { version = "0.86.0", features = ["blob-diff", "revision"] }
 notify = "8.2.0"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 sha2 = "0.10"
 similar = "2.7"
 thiserror = "2.0"
-
-[dev-dependencies]
-serde_json = "1.0"
 
 [lints.rust]
 unsafe_code = "forbid"

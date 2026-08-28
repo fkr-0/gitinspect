@@ -4,8 +4,8 @@ use std::fs;
 use std::time::{Duration, Instant};
 
 use gitinspect_core::{
-    ChangeReason, FileKind, FileStatus, OpenOptions, RawWatchEvent, RefKind, RepositoryService,
-    SignatureStatus, WatchOptions,
+    ChangeReason, FileContentStatus, FileDetailOptions, FileKind, FileStatus, OpenOptions,
+    PatchLineKind, RawWatchEvent, RefKind, RepositoryService, SignatureStatus, WatchOptions,
 };
 
 use common::FixtureRepo;
@@ -356,6 +356,82 @@ fn commit_diff_is_lazy_and_large_binary_content_is_not_materialized() {
     assert_eq!(diff.files.len(), 1);
     assert_eq!(diff.files[0].kind, FileKind::Binary);
     assert_eq!(diff.files[0].bytes, Some(4096));
+}
+
+#[test]
+fn commit_file_detail_is_path_targeted_and_patch_bounded() {
+    let repo = FixtureRepo::new("file-detail");
+    repo.write("selected.txt", "one\ntwo\nthree\n");
+    repo.write("other.txt", "unchanged base\n");
+    repo.commit_all("base");
+    repo.write("selected.txt", "one\nTWO\nthree\nfour\n");
+    repo.write("other.txt", "changed elsewhere\n");
+    let oid = repo.commit_all("modify two files");
+
+    let (handle, _) = RepositoryService::open(&repo.path, OpenOptions::default()).unwrap();
+    let detail = handle
+        .commit_file_detail(
+            &oid,
+            "selected.txt",
+            FileDetailOptions {
+                max_patch_lines: 3,
+                context_lines: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(detail.path, "selected.txt");
+    assert_eq!(detail.status, FileStatus::Modified);
+    assert_eq!(detail.kind, FileKind::Text);
+    assert_eq!(detail.content_status, FileContentStatus::Text);
+    assert!(detail.old_oid.is_some());
+    assert!(detail.new_oid.is_some());
+    assert!(detail.truncated);
+    assert_eq!(
+        detail
+            .hunks
+            .iter()
+            .map(|hunk| hunk.lines.len())
+            .sum::<usize>(),
+        3
+    );
+    assert!(
+        detail
+            .hunks
+            .iter()
+            .flat_map(|hunk| &hunk.lines)
+            .any(|line| { matches!(line.kind, PatchLineKind::Deletion | PatchLineKind::Addition) })
+    );
+
+    let error = handle
+        .commit_file_detail(&oid, "not-changed.txt", FileDetailOptions::default())
+        .unwrap_err();
+    assert!(error.to_string().contains("not-changed.txt"));
+}
+
+#[test]
+fn commit_file_detail_returns_metadata_only_for_oversize_content() {
+    let repo = FixtureRepo::new("file-detail-large");
+    repo.write("large.txt", "x".repeat(4096));
+    let oid = repo.commit_all("large");
+    let (handle, _) = RepositoryService::open(&repo.path, OpenOptions::default()).unwrap();
+
+    let detail = handle
+        .commit_file_detail(
+            &oid,
+            "large.txt",
+            FileDetailOptions {
+                max_blob_bytes: 64,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(detail.content_status, FileContentStatus::TooLarge);
+    assert!(detail.hunks.is_empty());
+    assert!(detail.truncated);
+    assert_eq!(detail.new_bytes, Some(4096));
 }
 
 #[test]

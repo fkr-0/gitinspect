@@ -20,6 +20,7 @@ use thiserror::Error;
 use crate::{GitRepositorySnapshot, OpenOptions, RefKind, RepositoryHandle, RepositoryService};
 
 const MAX_OPERATIONS: usize = 64;
+const MAX_REWRITE_COMMITS: usize = 64;
 const MAX_TRANSACTION_ID_BYTES: usize = 128;
 const MAX_REF_NAME_BYTES: usize = 255;
 const MAX_COMMAND_MESSAGE_BYTES: usize = 4096;
@@ -1173,10 +1174,18 @@ fn validate_operations(
                         "rewrite preview requires at least one commit".to_owned(),
                     ));
                 }
+                if commit_oids.len() > MAX_REWRITE_COMMITS {
+                    return Err(MutationPreviewError::InvalidInput(format!(
+                        "rewrite preview commit count exceeds {MAX_REWRITE_COMMITS}"
+                    )));
+                }
                 for oid in commit_oids {
                     validate_oid(oid)?;
                 }
-                let mut unique = commit_oids.clone();
+                let mut unique = commit_oids
+                    .iter()
+                    .map(|oid| oid.to_ascii_lowercase())
+                    .collect::<Vec<_>>();
                 unique.sort();
                 unique.dedup();
                 if unique.len() != commit_oids.len() {
@@ -1340,7 +1349,11 @@ fn changed_refs(
         .collect()
 }
 
-fn operation_digest(transaction_id: &str, base_revision: &str, canonical: &[String]) -> String {
+pub(crate) fn operation_digest(
+    transaction_id: &str,
+    base_revision: &str,
+    canonical: &[String],
+) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"gitinspect-mutation-preview-operations-v1\0");
     hasher.update(transaction_id.as_bytes());
@@ -1354,7 +1367,7 @@ fn operation_digest(transaction_id: &str, base_revision: &str, canonical: &[Stri
     format!("sha256:{:x}", hasher.finalize())
 }
 
-fn token_for(namespace: &str, values: &[&str]) -> String {
+pub(crate) fn token_for(namespace: &str, values: &[&str]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"gitinspect-mutation-preview-token-v1\0");
     hasher.update(namespace.as_bytes());

@@ -5,7 +5,9 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use gitinspect_core::{
-    CompactGitRepositorySnapshot, GitRepositorySnapshot, OpenOptions, RepositoryService,
+    CompactGitCommitBatch, CompactGitRepositorySnapshot, GitRefRecord, GitRemoteRecord,
+    GitRepositorySnapshot, OpenOptions, RepositoryAppendAwareRefresh, RepositoryRefreshCursor,
+    RepositoryService,
 };
 use serde::Serialize;
 
@@ -21,6 +23,30 @@ struct RepositorySessionPayload<'a> {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct CompactAppendDeltaPayload<'a> {
+    base_revision: &'a str,
+    base_head: &'a str,
+    revision: &'a str,
+    head: &'a str,
+    head_ref: &'a str,
+    commits: &'a CompactGitCommitBatch,
+    refs: &'a [GitRefRecord],
+    remotes: &'a [GitRemoteRecord],
+    hooks: &'a [String],
+    drop_commit_count: usize,
+    truncated: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "kebab-case")]
+enum CompactDeltaRefreshPayload<'a> {
+    Delta {
+        delta: CompactAppendDeltaPayload<'a>,
+    },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct CompactScaleBenchResult {
     mode: &'static str,
     commits_requested: usize,
@@ -32,6 +58,12 @@ struct CompactScaleBenchResult {
     compact_ipc_session_json_bytes: usize,
     compact_payload_bytes_per_commit: f64,
     unchanged_revision_check_ms: f64,
+    append_delta_refresh_ms: f64,
+    append_delta_conversion_ms: f64,
+    append_delta_serialization_ms: f64,
+    append_delta_ipc_json_bytes: usize,
+    append_delta_commits: usize,
+    append_delta_drop_commit_count: usize,
     all_commit_files_lazy: bool,
     snapshot_truncated: bool,
     deterministic_head: String,
@@ -40,6 +72,7 @@ struct CompactScaleBenchResult {
     compact_conversion_rss_bytes: Option<u64>,
     compact_rss_bytes: Option<u64>,
     compact_ipc_rss_bytes: Option<u64>,
+    append_delta_rss_bytes: Option<u64>,
     peak_rss_bytes: Option<u64>,
     fixture_path: String,
 }
@@ -414,6 +447,7 @@ fn run_compact(commits_requested: usize) -> Result<CompactScaleBenchResult, Stri
         .clone()
         .ok_or_else(|| "generated fixture has no HEAD".to_owned())?;
     let revision = snapshot.revision.clone();
+    let cursor = RepositoryRefreshCursor::from_snapshot(&snapshot, &options);
     let snapshot_rss_bytes = proc_memory_bytes("VmRSS:");
 
     let compact_started = Instant::now();
@@ -438,12 +472,58 @@ fn run_compact(commits_requested: usize) -> Result<CompactScaleBenchResult, Stri
 
     let unchanged_started = Instant::now();
     let unchanged = handle
-        .refresh_if_changed(&revision, options)
+        .refresh_if_changed(&revision, options.clone())
         .map_err(|error| error.to_string())?;
     let unchanged_revision_check_ms = elapsed_ms(unchanged_started.elapsed());
     if unchanged.is_some() {
         return Err("unchanged revision-aware refresh rebuilt a snapshot".to_owned());
     }
+
+    append_refresh_commit(&fixture_path, commits_requested)?;
+    let append_refresh_started = Instant::now();
+    let append_refresh = handle
+        .refresh_append_aware(&cursor, options)
+        .map_err(|error| error.to_string())?;
+    let append_delta_refresh_ms = elapsed_ms(append_refresh_started.elapsed());
+    let RepositoryAppendAwareRefresh::Append { delta } = append_refresh else {
+        return Err("single linear append did not use append-aware delta path".to_owned());
+    };
+    if delta.commits.len() != 1 {
+        return Err(format!(
+            "single append returned {} delta commits",
+            delta.commits.len()
+        ));
+    }
+
+    let append_conversion_started = Instant::now();
+    let compact_delta_commits =
+        CompactGitCommitBatch::from_commits(&delta.commits).map_err(|error| error.to_string())?;
+    let append_delta_conversion_ms = elapsed_ms(append_conversion_started.elapsed());
+    let append_serialization_started = Instant::now();
+    let append_payload = serde_json::to_vec(&CompactDeltaRefreshPayload::Delta {
+        delta: CompactAppendDeltaPayload {
+            base_revision: &delta.base_revision,
+            base_head: &delta.base_head,
+            revision: &delta.revision,
+            head: &delta.head,
+            head_ref: &delta.head_ref,
+            commits: &compact_delta_commits,
+            refs: &delta.refs,
+            remotes: &delta.remotes,
+            hooks: &delta.hooks,
+            drop_commit_count: delta.drop_commit_count,
+            truncated: delta.truncated,
+        },
+    })
+    .map_err(|error| error.to_string())?;
+    let append_delta_serialization_ms = elapsed_ms(append_serialization_started.elapsed());
+    let append_delta_ipc_json_bytes = append_payload.len();
+    let append_delta_rss_bytes = proc_memory_bytes("VmRSS:");
+    let append_delta_commits = delta.commits.len();
+    let append_delta_drop_commit_count = delta.drop_commit_count;
+    drop(append_payload);
+    drop(compact_delta_commits);
+    drop(delta);
 
     Ok(CompactScaleBenchResult {
         mode: "compact-only",
@@ -457,6 +537,12 @@ fn run_compact(commits_requested: usize) -> Result<CompactScaleBenchResult, Stri
         compact_payload_bytes_per_commit: compact_ipc_session_json_bytes as f64
             / commits_requested as f64,
         unchanged_revision_check_ms,
+        append_delta_refresh_ms,
+        append_delta_conversion_ms,
+        append_delta_serialization_ms,
+        append_delta_ipc_json_bytes,
+        append_delta_commits,
+        append_delta_drop_commit_count,
         all_commit_files_lazy,
         snapshot_truncated,
         deterministic_head,
@@ -465,6 +551,7 @@ fn run_compact(commits_requested: usize) -> Result<CompactScaleBenchResult, Stri
         compact_conversion_rss_bytes,
         compact_rss_bytes,
         compact_ipc_rss_bytes,
+        append_delta_rss_bytes,
         peak_rss_bytes: proc_memory_bytes("VmHWM:"),
         fixture_path: fixture_path.to_string_lossy().into_owned(),
     })

@@ -200,6 +200,153 @@ fn every_supported_operation_runs_only_in_a_disposable_copy() {
 }
 
 #[test]
+fn multi_operation_order_is_stable_and_backend_batch_bound_is_fail_closed() {
+    let fixture = Fixture::new();
+    let manager = sandbox_manager();
+    let before = fixture.original_state();
+    let sandbox = manager
+        .create_sandbox(&fixture.handle, &fixture.revision)
+        .unwrap();
+    let operations = vec![
+        MutationPreviewOperation::BranchRename {
+            old_name: "rename-me".to_owned(),
+            new_name: "renamed-first-by-order".to_owned(),
+        },
+        MutationPreviewOperation::TagMove {
+            name: "v1".to_owned(),
+            target_oid: fixture.main.clone(),
+        },
+        MutationPreviewOperation::BranchDelete {
+            name: "delete-me".to_owned(),
+        },
+        MutationPreviewOperation::TagDelete {
+            name: "v1".to_owned(),
+        },
+        MutationPreviewOperation::BranchCreate {
+            name: "z-created-fifth".to_owned(),
+            target_oid: Some(fixture.base.clone()),
+        },
+        MutationPreviewOperation::TagCreate {
+            name: "a-created-sixth".to_owned(),
+            target_oid: Some(fixture.main.clone()),
+        },
+        MutationPreviewOperation::RebaseReorder {
+            branch: "linear".to_owned(),
+            onto_oid: fixture.base.clone(),
+            commit_oids: vec![
+                fixture.linear[2].clone(),
+                fixture.linear[0].clone(),
+                fixture.linear[1].clone(),
+            ],
+        },
+    ];
+    let result = manager
+        .preview(&sandbox.sandbox_id, "tx-ordered", &operations)
+        .unwrap();
+    assert!(
+        result.success,
+        "mixed ref preview failed: {:?}",
+        result.failures
+    );
+    let kinds = result
+        .canonical_operations
+        .iter()
+        .map(|operation| operation.split('|').next().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        kinds,
+        vec![
+            "branch-rename",
+            "tag-move",
+            "branch-delete",
+            "tag-delete",
+            "branch-create",
+            "tag-create",
+            "rebase-reorder",
+        ]
+    );
+    let rewrite_order = result
+        .rewritten_commits
+        .iter()
+        .filter(|rewrite| rewrite.operation_index == 6)
+        .map(|rewrite| rewrite.old_oid.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rewrite_order,
+        vec![
+            fixture.linear[2].as_str(),
+            fixture.linear[0].as_str(),
+            fixture.linear[1].as_str(),
+        ]
+    );
+    assert_eq!(fixture.original_state(), before);
+    manager.cleanup(&sandbox.sandbox_id).unwrap();
+
+    let sandbox = manager
+        .create_sandbox(&fixture.handle, &fixture.revision)
+        .unwrap();
+    let oversized = (0..65)
+        .map(|index| MutationPreviewOperation::BranchCreate {
+            name: format!("bounded-{index}"),
+            target_oid: Some(fixture.base.clone()),
+        })
+        .collect::<Vec<_>>();
+    let error = manager
+        .preview(&sandbox.sandbox_id, "tx-over-bound", &oversized)
+        .unwrap_err();
+    assert!(error.to_string().contains("operation count exceeds 64"));
+    assert_eq!(fixture.original_state(), before);
+    manager.cleanup(&sandbox.sandbox_id).unwrap();
+
+    let sandbox = manager
+        .create_sandbox(&fixture.handle, &fixture.revision)
+        .unwrap();
+    let oversized_rewrite = (0..65)
+        .map(|index| format!("{index:040x}"))
+        .collect::<Vec<_>>();
+    let error = manager
+        .preview(
+            &sandbox.sandbox_id,
+            "tx-rewrite-over-bound",
+            &[MutationPreviewOperation::RebaseReorder {
+                branch: "linear".to_owned(),
+                onto_oid: fixture.base.clone(),
+                commit_oids: oversized_rewrite,
+            }],
+        )
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("rewrite preview commit count exceeds 64")
+    );
+    assert_eq!(fixture.original_state(), before);
+    manager.cleanup(&sandbox.sandbox_id).unwrap();
+
+    let sandbox = manager
+        .create_sandbox(&fixture.handle, &fixture.revision)
+        .unwrap();
+    let error = manager
+        .preview(
+            &sandbox.sandbox_id,
+            "tx-rewrite-duplicate",
+            &[MutationPreviewOperation::Fixup {
+                branch: "linear".to_owned(),
+                onto_oid: fixture.base.clone(),
+                commit_oids: vec!["A".repeat(40), "a".repeat(40)],
+            }],
+        )
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("commit list contains duplicates")
+    );
+    assert_eq!(fixture.original_state(), before);
+    manager.cleanup(&sandbox.sandbox_id).unwrap();
+}
+
+#[test]
 fn conflicting_cherry_pick_is_structured_and_original_is_untouched() {
     let fixture = Fixture::new();
     let before = fixture.original_state();

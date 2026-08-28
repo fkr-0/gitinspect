@@ -66,6 +66,67 @@ impl ScaleFixture {
         );
         Self { path }
     }
+
+    pub fn append_commit(&self, ordinal: usize, label: &str) -> String {
+        let parent = self.output(&["rev-parse", "HEAD"]);
+        let timestamp = BASE_TIMESTAMP + ordinal as i64;
+        let mut child = Command::new("git")
+            .args(["fast-import", "--quiet"])
+            .current_dir(&self.path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        {
+            let stream = child.stdin.as_mut().unwrap();
+            writeln!(stream, "commit refs/heads/main").unwrap();
+            writeln!(
+                stream,
+                "author Scale Fixture <scale@example.invalid> {timestamp} +0000"
+            )
+            .unwrap();
+            writeln!(
+                stream,
+                "committer Scale Fixture <scale@example.invalid> {timestamp} +0000"
+            )
+            .unwrap();
+            write_data(stream, &format!("{label} {ordinal}\n"));
+            writeln!(stream, "from {parent}").unwrap();
+            writeln!(stream, "M 100644 inline state.txt").unwrap();
+            write_data(stream, &format!("{label} fixture {ordinal}\n"));
+            writeln!(stream).unwrap();
+        }
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "append fast-import failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        self.output(&["rev-parse", "HEAD"])
+    }
+
+    pub fn create_branch(&self, name: &str, target: &str) {
+        run_git(&self.path, &["branch", name, target]);
+    }
+
+    pub fn reset_hard(&self, target: &str) {
+        run_git(&self.path, &["reset", "--hard", target]);
+    }
+
+    pub fn output(&self, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&self.path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    }
 }
 
 impl Drop for ScaleFixture {

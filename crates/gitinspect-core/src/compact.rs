@@ -17,6 +17,63 @@ pub enum CompactSnapshotError {
     InvalidSignatureStatus(u8),
 }
 
+fn expand_compact_commit(
+    strings: &[String],
+    commit: &CompactGitCommitRecord,
+) -> Result<GitCommitRecord, CompactSnapshotError> {
+    let string = |index: u32| {
+        strings
+            .get(index as usize)
+            .map(String::as_str)
+            .ok_or(CompactSnapshotError::InvalidStringIndex(index))
+    };
+    Ok(GitCommitRecord {
+        oid: string(commit.0)?.to_owned(),
+        tree_oid: string(commit.1)?.to_owned(),
+        parents: commit
+            .2
+            .iter()
+            .map(|index| string(*index).map(str::to_owned))
+            .collect::<Result<Vec<_>, _>>()?,
+        author_name: string(commit.3)?.to_owned(),
+        author_email: commit
+            .4
+            .map(|index| string(index).map(str::to_owned))
+            .transpose()?,
+        authored_at_ms: commit.5,
+        committed_at_ms: commit.6,
+        message: string(commit.7)?.to_owned(),
+        signature_status: signature_from_code(commit.8)?,
+        files: Vec::new(),
+    })
+}
+
+impl CompactGitCommitBatch {
+    pub fn from_commits(commits: &[GitCommitRecord]) -> Result<Self, CompactSnapshotError> {
+        if commits.iter().any(|commit| !commit.files.is_empty()) {
+            return Err(CompactSnapshotError::CommitFilesPresent);
+        }
+
+        let mut strings = StringInterner::new();
+        let mut compact = Vec::with_capacity(commits.len());
+        for commit in commits {
+            compact.push(compact_commit(commit, &mut strings)?);
+        }
+
+        Ok(Self {
+            strings: strings.values,
+            commits: compact,
+        })
+    }
+
+    pub fn expand(&self) -> Result<Vec<GitCommitRecord>, CompactSnapshotError> {
+        self.commits
+            .iter()
+            .map(|commit| expand_compact_commit(&self.strings, commit))
+            .collect()
+    }
+}
+
 /// Additive wire representation for metadata-only repository snapshots.
 ///
 /// The public `GitRepositorySnapshot` contract remains authoritative. This
@@ -41,6 +98,18 @@ pub struct CompactGitRepositorySnapshot {
     pub remotes: Vec<crate::GitRemoteRecord>,
     pub hooks: Vec<String>,
     pub truncated: bool,
+}
+
+/// Compact commit-only batch used by append-aware refresh transport.
+///
+/// The batch deliberately carries no repository metadata. A caller must bind
+/// it to an explicit base revision and validate that base before applying the
+/// commits to an existing snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactGitCommitBatch {
+    pub strings: Vec<String>,
+    pub commits: Vec<CompactGitCommitRecord>,
 }
 
 /// Positional commit record used only by the compact wire contract.
@@ -142,32 +211,7 @@ impl CompactGitRepositorySnapshot {
         &self,
         commit: &CompactGitCommitRecord,
     ) -> Result<GitCommitRecord, CompactSnapshotError> {
-        Ok(GitCommitRecord {
-            oid: self.string(commit.0)?.to_owned(),
-            tree_oid: self.string(commit.1)?.to_owned(),
-            parents: commit
-                .2
-                .iter()
-                .map(|index| self.string(*index).map(str::to_owned))
-                .collect::<Result<Vec<_>, _>>()?,
-            author_name: self.string(commit.3)?.to_owned(),
-            author_email: commit
-                .4
-                .map(|index| self.string(index).map(str::to_owned))
-                .transpose()?,
-            authored_at_ms: commit.5,
-            committed_at_ms: commit.6,
-            message: self.string(commit.7)?.to_owned(),
-            signature_status: signature_from_code(commit.8)?,
-            files: Vec::new(),
-        })
-    }
-
-    fn string(&self, index: u32) -> Result<&str, CompactSnapshotError> {
-        self.strings
-            .get(index as usize)
-            .map(String::as_str)
-            .ok_or(CompactSnapshotError::InvalidStringIndex(index))
+        expand_compact_commit(&self.strings, commit)
     }
 }
 
@@ -257,5 +301,24 @@ mod tests {
             CompactGitRepositorySnapshot::from_snapshot(&snapshot),
             Err(CompactSnapshotError::CommitFilesPresent)
         );
+    }
+
+    #[test]
+    fn compact_commit_batch_round_trips_metadata_only_records() {
+        let commits = vec![GitCommitRecord {
+            oid: "child".to_owned(),
+            tree_oid: "tree".to_owned(),
+            parents: vec!["parent".to_owned()],
+            author_name: "author".to_owned(),
+            author_email: Some("author@example.invalid".to_owned()),
+            authored_at_ms: 2,
+            committed_at_ms: 3,
+            message: "message".to_owned(),
+            signature_status: SignatureStatus::Unsigned,
+            files: Vec::new(),
+        }];
+        let batch = CompactGitCommitBatch::from_commits(&commits).unwrap();
+
+        assert_eq!(batch.expand().unwrap(), commits);
     }
 }

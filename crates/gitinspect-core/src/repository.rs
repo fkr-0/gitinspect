@@ -9,8 +9,10 @@ use thiserror::Error;
 
 use crate::diff;
 use crate::{
-    CommitDiff, DiffOptions, GitCommitRecord, GitRefRecord, GitRemoteRecord, GitRepositorySnapshot,
-    OpenOptions, RefKind, SignatureStatus,
+    CommitDiff, CommitFileDetail, DiffOptions, FileDetailOptions, GitCommitRecord, GitRefRecord,
+    GitRemoteRecord, GitRepositorySnapshot, MAX_APPEND_DELTA_COMMITS, OpenOptions, RefKind,
+    RepositoryAppendAwareRefresh, RepositoryAppendMetadata, RepositoryRefreshCursor,
+    SignatureStatus,
 };
 use crate::{RawWatchEvent, RepositoryChange, WatchCoalescer, WatchOptions};
 
@@ -28,6 +30,17 @@ pub enum Error {
     NotRepository(PathBuf),
     #[error("repository watcher operation failed: {0}")]
     Watch(String),
+    #[error("path {path} is not changed by commit {oid}")]
+    ChangedPathNotFound { oid: String, path: String },
+}
+
+fn full_append_aware_refresh(
+    repo: &gix::Repository,
+    options: &OpenOptions,
+    metadata: SnapshotMetadata,
+) -> Result<RepositoryAppendAwareRefresh, Error> {
+    snapshot_from_metadata(repo, options, metadata)
+        .map(|snapshot| RepositoryAppendAwareRefresh::Full { snapshot })
 }
 
 impl Error {
@@ -97,6 +110,102 @@ impl RepositoryHandle {
         snapshot_from_repo_if_changed(&repo, &options, current_revision)
     }
 
+    /// Attempt a bounded append-aware metadata refresh before falling back to
+    /// the authoritative full snapshot walk.
+    ///
+    /// The fast path is deliberately narrow: the cursor must describe a
+    /// metadata-only linear snapshot, the attached HEAD ref must be the only
+    /// changed ref record, and the new HEAD must reach the cursor HEAD through
+    /// a single-parent chain within `MAX_APPEND_DELTA_COMMITS`. Any branch/ref
+    /// movement, merge, force-push/divergence, detached/unborn state, option
+    /// mismatch, or oversized advance returns a full snapshot instead.
+    pub fn refresh_append_aware(
+        &self,
+        cursor: &RepositoryRefreshCursor,
+        options: OpenOptions,
+    ) -> Result<RepositoryAppendAwareRefresh, Error> {
+        let repo = gix::open(&self.git_dir).map_err(Error::git)?;
+        let metadata = snapshot_metadata_from_repo(&repo)?;
+        if metadata.revision == cursor.revision() {
+            return Ok(RepositoryAppendAwareRefresh::Unchanged {
+                revision: metadata.revision,
+            });
+        }
+        if !cursor.matches_options(&options)
+            || !cursor.append_candidate_metadata(
+                metadata.head.as_deref(),
+                metadata.head_ref.as_deref(),
+                &metadata.refs,
+                &metadata.remotes,
+                &metadata.hooks,
+            )
+        {
+            return full_append_aware_refresh(&repo, &options, metadata);
+        }
+
+        let (Some(mut current_oid), Some(head_ref), Some(old_head)) = (
+            metadata.head.clone(),
+            metadata.head_ref.clone(),
+            cursor.head().map(str::to_owned),
+        ) else {
+            return full_append_aware_refresh(&repo, &options, metadata);
+        };
+        let new_head = current_oid.clone();
+        let mut commits = Vec::new();
+        while current_oid != old_head {
+            if commits.len() >= MAX_APPEND_DELTA_COMMITS {
+                return full_append_aware_refresh(&repo, &options, metadata);
+            }
+            let id = match gix::ObjectId::from_hex(current_oid.as_bytes()) {
+                Ok(id) => id,
+                Err(_) => return full_append_aware_refresh(&repo, &options, metadata),
+            };
+            let commit = match repo.find_commit(id) {
+                Ok(commit) => commit,
+                Err(_) => return full_append_aware_refresh(&repo, &options, metadata),
+            };
+            let parents = commit
+                .parent_ids()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>();
+            if parents.len() != 1 {
+                return full_append_aware_refresh(&repo, &options, metadata);
+            }
+            let (record, files_truncated) = commit_record(&repo, &commit, &options)?;
+            debug_assert!(
+                !files_truncated,
+                "append-aware cursor forbids eager commit files"
+            );
+            commits.push(record);
+            current_oid = parents[0].clone();
+        }
+
+        match cursor.build_append_delta(
+            RepositoryAppendMetadata {
+                revision: metadata.revision.clone(),
+                head: new_head,
+                head_ref,
+                refs: metadata.refs.clone(),
+                remotes: metadata.remotes.clone(),
+                hooks: metadata.hooks.clone(),
+            },
+            commits,
+        ) {
+            Ok(delta) => {
+                // Re-read only the O(ref/remote/hook) revision metadata after
+                // the bounded object walk. If a ref moved concurrently, do
+                // not publish a delta against a stale cursor; rebuild from the
+                // newly observed metadata instead.
+                let validated = snapshot_metadata_from_repo(&repo)?;
+                if validated.revision != metadata.revision {
+                    return full_append_aware_refresh(&repo, &options, validated);
+                }
+                Ok(RepositoryAppendAwareRefresh::Append { delta })
+            }
+            Err(_) => full_append_aware_refresh(&repo, &options, metadata),
+        }
+    }
+
     pub fn commit_diff(
         &self,
         oid: impl AsRef<str>,
@@ -112,6 +221,18 @@ impl RepositoryHandle {
             files,
             truncated,
         })
+    }
+
+    pub fn commit_file_detail(
+        &self,
+        oid: impl AsRef<str>,
+        path: impl AsRef<str>,
+        options: FileDetailOptions,
+    ) -> Result<CommitFileDetail, Error> {
+        let repo = gix::open(&self.git_dir).map_err(Error::git)?;
+        let id = gix::ObjectId::from_hex(oid.as_ref().as_bytes()).map_err(Error::git)?;
+        let commit = repo.find_commit(id).map_err(Error::git)?;
+        diff::commit_file_detail(&repo, &commit, path.as_ref(), &options)
     }
 
     /// Start a native filesystem watcher for the per-worktree git directory and
@@ -300,16 +421,28 @@ fn collect_commits(
         }
         let info = info.map_err(Error::git)?;
         let commit = repo.find_commit(info.id).map_err(Error::git)?;
-        let author = commit.author().map_err(Error::git)?;
-        let committer = commit.committer().map_err(Error::git)?;
-        let files = if options.include_commit_files {
-            let (_, files, files_truncated) = diff::commit_diff(repo, &commit, &options.diff)?;
-            truncated |= files_truncated;
-            files
-        } else {
-            Vec::new()
-        };
-        commits.push(GitCommitRecord {
+        let (record, files_truncated) = commit_record(repo, &commit, options)?;
+        truncated |= files_truncated;
+        commits.push(record);
+    }
+    Ok((commits, truncated))
+}
+
+fn commit_record(
+    repo: &gix::Repository,
+    commit: &gix::Commit<'_>,
+    options: &OpenOptions,
+) -> Result<(GitCommitRecord, bool), Error> {
+    let author = commit.author().map_err(Error::git)?;
+    let committer = commit.committer().map_err(Error::git)?;
+    let (files, files_truncated) = if options.include_commit_files {
+        let (_, files, files_truncated) = diff::commit_diff(repo, commit, &options.diff)?;
+        (files, files_truncated)
+    } else {
+        (Vec::new(), false)
+    };
+    Ok((
+        GitCommitRecord {
             oid: commit.id.to_string(),
             tree_oid: commit.tree_id().map_err(Error::git)?.to_string(),
             parents: commit.parent_ids().map(|id| id.to_string()).collect(),
@@ -333,9 +466,9 @@ fn collect_commits(
                 SignatureStatus::Unsigned
             },
             files,
-        });
-    }
-    Ok((commits, truncated))
+        },
+        files_truncated,
+    ))
 }
 
 fn collect_refs(repo: &gix::Repository) -> Result<Vec<GitRefRecord>, Error> {

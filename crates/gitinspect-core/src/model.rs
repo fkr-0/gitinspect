@@ -23,6 +23,28 @@ impl Default for OpenOptions {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct FileDetailOptions {
+    /// Maximum size of either side of the selected file that may be materialized.
+    /// Larger objects return metadata only.
+    pub max_blob_bytes: u64,
+    /// Maximum number of rendered patch lines across all hunks.
+    pub max_patch_lines: usize,
+    /// Equal-line context retained around each change cluster.
+    pub context_lines: usize,
+}
+
+impl Default for FileDetailOptions {
+    fn default() -> Self {
+        Self {
+            max_blob_bytes: 256 * 1024,
+            max_patch_lines: 1_000,
+            context_lines: 3,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DiffOptions {
     /// Maximum blob size that may be materialized for text/binary inspection.
     /// Objects larger than this are treated as binary/opaque without loading
@@ -61,6 +83,66 @@ pub struct GitRepositorySnapshot {
     pub refs: Vec<GitRefRecord>,
     pub remotes: Vec<GitRemoteRecord>,
     pub hooks: Vec<String>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FileContentStatus {
+    Text,
+    Binary,
+    TooLarge,
+    Opaque,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PatchLineKind {
+    Context,
+    Addition,
+    Deletion,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchLine {
+    pub kind: PatchLineKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_line: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_line: Option<u64>,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchHunk {
+    pub old_start: u64,
+    pub old_lines: u64,
+    pub new_start: u64,
+    pub new_lines: u64,
+    pub lines: Vec<PatchLine>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitFileDetail {
+    pub oid: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_oid: Option<String>,
+    pub path: String,
+    pub status: FileStatus,
+    pub kind: FileKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_oid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_oid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_bytes: Option<u64>,
+    pub content_status: FileContentStatus,
+    pub hunks: Vec<PatchHunk>,
     pub truncated: bool,
 }
 
