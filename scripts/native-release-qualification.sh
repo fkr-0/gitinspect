@@ -395,6 +395,28 @@ run_self_test() {
     failures=$((failures + 1))
   fi
 
+  # A second gate invocation must not be able to pass its zero-runner
+  # preflight while the first invocation is between preflight and native
+  # launch. Qualify the Linux advisory-lock primitive without touching X11.
+  if command -v flock >/dev/null 2>&1; then
+    local contention_lock="$runtime_dir/qualification-contention.lock"
+    exec 7>"$contention_lock"
+    if ! flock -n 7; then
+      echo 'self_test_failure=qualification contention fixture could not acquire owner lock' >&2
+      failures=$((failures + 1))
+    elif flock -n "$contention_lock" -c true 2>/dev/null; then
+      echo 'self_test_failure=qualification contention allowed a second owner' >&2
+      failures=$((failures + 1))
+    else
+      printf 'qualification_lock_self_test=PASS concurrent_owner_rejected=true\n'
+    fi
+    flock -u 7 || true
+    exec 7>&-
+  else
+    echo 'self_test_failure=qualification contention fixture prerequisite unavailable tool=flock' >&2
+    failures=$((failures + 1))
+  fi
+
   if ((failures != 0)); then
     printf 'NATIVE_RELEASE_QUALIFICATION_SELF_TEST=FAIL failures=%d\n' "$failures" >&2
     return 1
@@ -1169,13 +1191,21 @@ if [[ "$(native_lane_platform_result "$platform_name")" != 'APPLICABLE' ]]; then
     'NOT_APPLICABLE'
 fi
 
-for tool in awk bash cargo curl date grep i3-msg jq pnpm ps readlink sed setsid sha256sum sort ss tr uname wmctrl xprop; do
+for tool in awk bash cargo curl date grep i3-msg jq flock pnpm ps readlink sed setsid sha256sum sort ss tr uname wmctrl xprop; do
   command -v "$tool" >/dev/null || write_environment_blocker "required tool unavailable: $tool" 'PREREQUISITE_UNAVAILABLE'
 done
 
 [[ -n "${DISPLAY:-}" ]] || write_environment_blocker 'DISPLAY is unset; X11 native qualification is unavailable' 'PREREQUISITE_UNAVAILABLE'
 i3-msg -t get_version >/dev/null 2>&1 || write_environment_blocker 'i3 IPC is unavailable on the active X11 session' 'PREREQUISITE_UNAVAILABLE'
 xprop -root _NET_ACTIVE_WINDOW >/dev/null 2>&1 || write_environment_blocker 'X11 root-window focus authority is unavailable' 'PREREQUISITE_UNAVAILABLE'
+
+# Serialize the complete desktop-sensitive qualification, closing the race in
+# which two gate invocations could both observe zero runners before either one
+# launched its Tauri client. The lock file may persist harmlessly; ownership is
+# the kernel-held advisory lock on this open file descriptor, so process exit
+# (including abnormal exit) releases authority without stale-lock cleanup.
+exec 8>"$repo_root/.git/native-release-qualification.lock"
+flock -n 8 || write_environment_blocker 'another native release qualification already owns the repository qualification lock' 'PREREQUISITE_UNAVAILABLE'
 
 original_workspace=$(focused_workspace)
 [[ -n "$original_workspace" ]] || write_environment_blocker 'i3 has no focused workspace to restore after qualification'
