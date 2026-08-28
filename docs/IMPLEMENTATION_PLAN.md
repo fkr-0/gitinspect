@@ -79,24 +79,31 @@ Current Phase-4 fidelity limits are intentional and visible. The backend does no
 
 ## Phase 5 — scale and mutation studio
 
-- synthetic 1k/10k/100k benchmark datasets;
-- macro LOD aggregation and selection promotion;
-- search/filter/highlight;
-- drill-down commit diff/tree world;
-- transaction draft/preview UI;
-- Rust mutation preview on copies;
-- interactive rebase/cherry-pick/squash/fixup/branch/tag operation previews;
-- only then evaluate guarded original-repository apply.
+Status: **implementation/qualification complete for preview-only product scope; original-repository apply remains NO-GO.**
+
+Delivered across the current shared product tree and its durable evidence:
+
+- deterministic synthetic 1k/10k/100k benchmark datasets plus macro LOD aggregation, structural-anchor preservation, selection/search promotion, and bounded render projections;
+- revision-aware indexed search/filter/highlight while retaining the complete logical Git graph as authority;
+- nested commit → changed-file → bounded hunk/blob drill-down with deterministic `WorldNavigationStack` restoration, refresh-aware revalidation, and bounded URL/history restoration;
+- semantic node/sub-element/edge picking with Git-specific modifier relations and camera-projected accessibility labels;
+- transaction draft/preview UI with ordered bounded multi-operation staging;
+- Rust copy-only mutation preview for branch/tag operations and cherry-pick/rebase-reorder/squash/fixup;
+- real Tauri/WebKit preview qualification covering successful rewrite ordering/hash cascades, structured conflicts, stale-revision rejection, cancellation, and sandbox cleanup;
+- guarded original-apply Phases 28–31 produced a stronger safety case and durable/fixture primitives but demonstrated that the required external-writer-honored whole-source concurrency envelope is not available in the current architecture. `FinalRepositoryToctou` therefore remains terminal and original apply remains disabled.
 
 ## Phase 6 — release
 
-- end-to-end safety and regression suite;
-- Tauri platform packages;
-- docs/tutorial/API reference;
-- diverse repository compatibility matrix;
-- performance evidence;
-- version/changelog/release checklist;
-- no push/tag/publish without separate operator authorization.
+Status: **in progress.** The visual/product regression body is strong, but packaging and release-candidate metadata are not yet complete.
+
+- end-to-end safety and regression suite: **in progress** — `pnpm release:verify` now provides one repeatable local gate spanning TypeScript, core Rust, Tauri, lint/build/tests and diff-check; CI Tauri parity now includes fmt/clippy/tests/check;
+- Tauri platform packages: **open** — `bundle.active` remains false and no installer/AppImage/bundle artifact is yet a qualified release artifact;
+- docs/tutorial/API reference: **open/partial** — specification/architecture/safety evidence exist, but release-oriented tutorial/reference consolidation remains;
+- diverse repository compatibility matrix: **Linux fixture matrix qualified / cross-platform partial** — `docs/COMPATIBILITY_MATRIX.md` now records worktree, git-dir, linked-worktree, bare, HEAD-state, refs/tags/stash/remotes, diff-bound, watcher, refresh and scale evidence; packaged macOS/Windows execution remains open;
+- performance evidence: **qualified for synthetic CPU/layout/LOD/search gates and browser visual topology**, not a packaged GPU/FPS claim;
+- version/changelog/release checklist: **in progress** — see `docs/RELEASE_CHECKLIST.md`; product/core/Tauri are 0.1.0 while the frontend package and changelog are not yet candidate-cut;
+- browser/WebAssembly/GitHub Pages: separate experimental provenance track; it must not be substituted for desktop/native release qualification;
+- no tag/push/publish/deploy without separate operator authorization.
 
 ## Integration gates
 

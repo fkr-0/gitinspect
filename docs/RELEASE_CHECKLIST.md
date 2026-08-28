@@ -1,0 +1,79 @@
+# GitInspect 0.1.0 release readiness
+
+This checklist is the fail-closed Phase-6 release contract for the desktop product. It does not authorize a tag, push, publication, GitHub release, deployment, or original-repository mutation capability.
+
+## Canonical release unit
+
+The 0.1.0 product release is the Tauri desktop application plus `gitinspect-core` at one repository revision. `@gitinspect/contracts` and `@gitinspect/graph-elements` are private workspace implementation packages and are not independently published by this release.
+
+Canonical version sources today:
+
+- `apps/gitinspect/src-tauri/tauri.conf.json` — product version;
+- `apps/gitinspect/src-tauri/Cargo.toml` — desktop crate version;
+- `crates/gitinspect-core/Cargo.toml` — core crate version;
+- `apps/gitinspect/package.json` — frontend package version, which must match before a release candidate is cut.
+
+## Reproducible local gates
+
+Use:
+
+```sh
+pnpm release:verify
+```
+
+This runs the complete TypeScript build/test/typecheck/lint matrix, Rust core fmt/clippy/tests, Tauri fmt/clippy/tests/check, and `git diff --check`. It also reports release-candidate metadata that is not yet satisfied without turning those development-state warnings into false regression failures.
+
+When preparing an actual candidate, use:
+
+```sh
+pnpm release:candidate
+```
+
+Candidate mode fails closed unless product/core/Tauri/frontend versions agree, Tauri bundling is enabled, and the changelog contains a versioned release heading.
+
+## Current 0.1.0 state
+
+### Qualified product capability
+
+- real local repository discovery/open/refresh through Rust/gix authority;
+- compact snapshot/delta refresh with native filesystem watch provenance;
+- deterministic Git Railfield visualization with fitted topology camera, canonical camera-projected labels, semantic picking and Git-aware LOD;
+- search/filter/highlight across the authoritative logical graph;
+- bounded nested commit/file/hunk/blob drill-down and URL/history restoration;
+- preview-only multi-operation mutation studio for branch/tag and commit rewrite operations;
+- deterministic native Tauri preview qualification for rewrite success/conflict/staleness/cancellation;
+- synthetic 1k/10k/100k scale evidence, with 100,004 logical nodes reduced to a bounded rendered projection;
+- original-repository mutation apply remains deliberately unavailable because the whole-source TOCTOU safety case is still NO-GO.
+
+### Release blockers still open
+
+1. **Platform packaging is not enabled.** `tauri.conf.json` currently has `bundle.active=false`. Packaging must be deliberately configured and then smoke-tested from produced artifacts on each supported platform.
+2. **Frontend product version is still development metadata.** `apps/gitinspect/package.json` remains `0.0.0` while the desktop/core product version is `0.1.0`.
+3. **The changelog is still Unreleased.** A dated/versioned 0.1.0 section must be cut only after the final candidate revision and compatibility evidence are frozen.
+4. **Cross-platform compatibility evidence is still partial.** `docs/COMPATIBILITY_MATRIX.md` now makes the existing worktree, git-dir, linked-worktree, bare, HEAD-state, refs/tags/stash/remotes, diff-bound, watcher and scale evidence explicit. Linux repository shapes are strongly qualified, but packaged macOS/Windows execution remains unproven.
+5. **Packaged desktop artifact smoke is missing.** Production Vite builds and native Tauri command/test harnesses are qualified, but a built installer/AppImage/bundle has not yet been exercised as the release artifact.
+6. **Documentation/API reference remains incomplete.** Architecture/specification are strong, but a concise user tutorial plus public API/reference surface for graph-elements/contracts still needs release-oriented consolidation.
+
+The experimental browser/WebAssembly/GitHub Pages work is a separate, explicitly synthetic/browser provenance track. Its completion does not satisfy desktop packaging or native-repository release gates.
+
+## Known non-blocking product limitations for 0.1.0
+
+These may ship if documented and accepted; they are not reasons to weaken safety gates:
+
+- annotated versus lightweight tag fidelity remains limited;
+- remote fetch/push status is not modeled;
+- merge edges are not true dual-band/two-color geometry;
+- commit signature verification may remain unknown/unsigned when robust verification is unavailable;
+- original-repository destructive apply remains disabled/NO-GO.
+
+## Final candidate gate
+
+Before creating any local tag, all of the following must be true:
+
+- `pnpm release:candidate` passes from the candidate revision;
+- expected source/release metadata diff is reviewed and no unrelated dirty work is absorbed;
+- platform bundle production is enabled and the produced artifact is smoke-tested;
+- changelog/version surfaces agree on the exact candidate version;
+- compatibility and performance evidence are attached to the candidate;
+- original-apply authority is still absent unless a separately authorized safety decision changes it;
+- tag/push/publish/deploy are performed only under separate explicit operator authorization.

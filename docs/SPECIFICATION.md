@@ -10,7 +10,7 @@ The framework accepts arbitrary data through a stable graph-shaped dataset. Doma
 
 ### gitinspect
 
-A desktop application that builds a Git semantic graph from a local repository, maps Git semantics to graph-elements visuals, supplies inspection content, and stages/executes transaction-safe Git mutations.
+A desktop application that builds a Git semantic graph from a local repository, maps Git semantics to graph-elements visuals, supplies inspection content, and stages/qualifies transaction-safe Git mutations in disposable preview sandboxes. The current 0.1.0 product exposes no original-repository apply command.
 
 ## 2. graph-elements conceptual dimensions
 
@@ -42,7 +42,7 @@ A desktop application that builds a Git semantic graph from a local repository, 
 | tags attached | transparent outer enclosure | one enclosure, tag count encoded by facets/indicator |
 | branches originating/pointing | floating arrows/indicators | count uses discrete recognizable ticks |
 | author | label + optional stable author accent | accents cannot override object-class color language |
-| authored/commit time | Y placement + label | layout uses commit generation/order to avoid timestamp anomalies |
+| authored/commit time | label/inspection metadata | chronology geometry is topological generation; wall-clock gaps do not create empty space |
 | merge commit | broader plate/core notch | parent edges make merge topology explicit |
 | GPG status | small shield/status indicator | valid/invalid/unknown/unsigned glyph grammar |
 
@@ -54,17 +54,17 @@ A desktop application that builds a Git semantic graph from a local repository, 
 | remote branch | elongated hexagonal prism | pulsing/dashed side stripe |
 | tracking branch | branch prism + paired indicator | connection indicator toward upstream |
 | lightweight tag | octahedron | single shell |
-| annotated tag | octahedron | double shell + message marker |
+| annotated tag | octahedron | currently shares the tag visual class; richer annotation-specific shell/message fidelity remains open |
 | stash | translucent torus | indexed tick marks |
-| remote | floating island/platform | beacon markers for fetch/push state |
+| remote | shallow semantic-depth platform near tracked refs | remote URLs/config are represented; live fetch/push health is not claimed |
 | repository root | low-detail world anchor | summary only at macro zoom |
 
 ## 4. Git relations → conceptual and visual mapping
 
 | Relation | Concept | Visual style | Direction |
 | --- | --- | --- | --- |
-| parent → child commit | history progression | solid line, subtle flow | upward/forward |
-| merge parent → merge child | convergence | thicker dual-band line | parents into merge |
+| parent → child commit | history progression | solid Railfield segment; active HEAD ancestry strongest | left-to-right oldest→newest |
+| merge parent → merge child | convergence | controlled peel/convergence route; selected ingress emphasized | parents into merge |
 | branch → commit | symbolic/direct ref pointer | dashed branch-colored line + arrow head | ref to target |
 | tag → object/commit | named immutable-ish marker | dotted line + diamond head | tag to target |
 | stash → base commit | saved working state ancestry | translucent wavy line | stash to base |
@@ -73,14 +73,16 @@ A desktop application that builds a Git semantic graph from a local repository, 
 | tree → tree/blob | filesystem containment | drill-down tree edge | parent to child |
 | HEAD → ref/commit | active checkout | bright focus tether | HEAD to target |
 
-## 5. Spatial semantics
+## 5. Spatial semantics — Git Railfield
 
-- **Y** is progress/history. Primary topological generation is monotonic upward; timestamps refine spacing but cannot invert ancestry.
-- **X/Z** express parallel complexity. Branch divergence creates lateral lanes; long-lived parallel branches retain stable lanes; convergence bends toward merge nodes.
-- Layout is deterministic from graph identity plus an explicit seed.
-- First-parent history receives lane continuity preference.
-- Ref/tag/stash nodes occupy orbit/ring space near their targets, not chronological lanes.
-- Remote islands sit outside the local-history hull and connect inward through remote-tracking links.
+- **X is topology chronology**, oldest→newest, using bounded topological-generation spacing rather than wall-clock distance or identity hashes.
+- **Y is branch lane**. The resolved HEAD first-parent spine occupies lane 0; divergence uses compact deterministic neighboring lanes and convergence returns to the target lane through controlled routed bends.
+- **Z is semantic depth only**. Commit ancestry is coplanar at Z=0. Local/tag/stash/HEAD/remote signals use shallow bounded offsets so depth explains attachment class instead of object identity.
+- Layout is deterministic for a fixed graph; identity is permitted only as a stable tie-break after topology has determined geometry candidates.
+- Ref/tag/stash/HEAD nodes are short attached signals physically local to their target commits, not independent orbit/ring islands.
+- Remote platforms remain local to their member remote refs rather than being pushed outside the history hull.
+- The active HEAD ancestry is the strongest continuous rail; ordinary history avoids repeated arrowhead noise; merge ingress remains explicit but subordinate to the active route.
+- DOM labels/accessibility hit surfaces project the same authoritative GraphWorld position through the active camera and never own a second pseudo-layout.
 
 ## 6. Interaction grammar
 
@@ -131,25 +133,28 @@ Commit inspection includes hash, author/committer, dates, full message, parents,
 
 Mutations are operations collected into a transaction against an immutable `baseRevision`.
 
-State machine:
+The generic graph-elements transaction model can represent later apply states, but GitInspect 0.1.0 deliberately stops at **copy-only preview/confirmation/cancellation** for repository mutation execution. There is no Tauri command that applies to the original repository.
 
-`draft → validating → previewed → confirmed → applying → applied | failed | cancelled`
+Current GitInspect flow:
+
+`draft → validating → sandbox created → previewed → confirmed | failed | cancelled`
 
 Rules:
 
 1. Draft operations are inert data.
-2. Preview defaults to a repository copy and computes ref movement, rewritten commit set, conflicts/warnings, and known/predicted hash cascade.
+2. Preview executes only in a gitinspect-owned disposable repository copy and computes ref movement, rewritten commit set, conflicts/warnings, and known/predicted hash cascade.
 3. Preview is invalid if live repository revision no longer matches the transaction base.
-4. Confirmation produces a single-use token bound to transaction + repository revision + target mode.
-5. Original-repository apply is a distinct command and never inferred from preview.
-6. UI drag/reorder operations only alter the draft until explicit confirmation.
+4. Confirmation is single-use evidence bound to the preview transaction/token; it does not authorize an original-repository effect.
+5. `create_mutation_sandbox`, `preview_mutation_transaction`, `confirm_mutation_preview`, and `cancel_mutation_sandbox` are the only mutation Tauri commands currently exposed.
+6. Original-repository apply remains NO-GO because the external-writer whole-source TOCTOU envelope is not demonstrated; `FinalRepositoryToctou` is terminal in the current safety case.
+7. UI drag/reorder operations only alter the draft until explicit preview/confirmation.
 
 ## 11. Repository loading and scale
 
 - Accept worktree root, `.git` directory, bare repository, and linked worktree paths.
 - Resolve `gitdir:` indirection and common-dir topology.
 - Read commits/trees/blobs/refs/packed-refs/remotes/config/hooks through Git-aware APIs rather than ad-hoc parsing where practical.
-- Initial world snapshot may omit expensive full diffs; per-commit file stats are progressively populated/cached.
+- Initial compact world snapshot omits expensive full diff/file-detail payloads; bounded commit diffs and path-targeted file/hunk/blob details are fetched lazily and cached by repository revision.
 - 100k-commit repositories use generation ranges + lane clusters for macro LOD.
 - `.git`/common-dir watcher coalesces bursts and emits revision-invalidating events; frontend requests a fresh snapshot/delta.
 
@@ -161,4 +166,4 @@ Target hardware class is an ordinary modern discrete/integrated GPU desktop/lapt
 - 10k commits: all topology visible, nearby commits detailed, distant commits simplified.
 - 100k commits: aggregate macro LOD, bounded labels, bounded draw calls; logical history remains searchable/inspectable.
 - Pointer hover should resolve within one animation frame for currently pickable geometry.
-- Repository snapshot loading should stream/progress rather than freeze the UI.
+- Repository snapshot loading should expose progress rather than freeze the UI. The current compact metadata/delta transport reduces blocking work, but explicit repository-open progress events remain an incomplete Phase-6 ergonomics task.

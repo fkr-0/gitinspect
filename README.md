@@ -43,3 +43,9 @@ The Tauri app and Rust workspace add their own focused commands as their tracks 
 - No background operation may silently invoke destructive Git actions.
 
 See `docs/SPECIFICATION.md`, `docs/ARCHITECTURE.md`, and `docs/IMPLEMENTATION_PLAN.md`.
+
+## Experimental browser / WebAssembly edition
+
+The normal product remains a Tauri desktop application with native Rust repository authority. A separate experimental browser entry now boots through a real Rust/WebAssembly module while deliberately retaining the deterministic synthetic repository adapter; native `gix` parsing, filesystem watching, and mutation authority are **not** claimed in the browser boundary.
+
+The proposed GitHub Pages site is documentation-first: `/` explains the architecture and safety model, then explicitly links to `/wasm/` for the experiment. See `docs/WEBASSEMBLY.md` and `.github/workflows/pages.yml` for the exact build/deployment contract.

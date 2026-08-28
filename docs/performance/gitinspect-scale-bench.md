@@ -12,7 +12,7 @@ This document defines the reproducible Phase-5 scale evidence for the native rep
 - whole-command user CPU, system CPU, elapsed wall time, and maximum RSS with `/usr/bin/time -v`;
 - the existing app-local search/index/LOD benchmark for bounded index/search behavior.
 
-The legacy native refresh API rebuilds a complete snapshot after a coalesced filesystem change. Phase 2 adds an opt-in compact Tauri transport whose refresh path first recomputes the existing revision-defining HEAD/ref/remote/hook metadata. An unchanged revision returns only an `unchanged` status plus the revision and skips the commit walk; a changed revision still falls back to the complete metadata-only snapshot. This is a revision-aware unchanged cache, not a general commit delta algorithm.
+The legacy native refresh API rebuilds a complete snapshot after a coalesced filesystem change. Phase 2 adds an opt-in compact Tauri transport whose refresh path first recomputes the existing revision-defining HEAD/ref/remote/hook metadata. An unchanged revision returns only an `unchanged` status plus the revision and skips the commit walk; a changed revision still falls back to the complete metadata-only snapshot. Phase 3 adds a separate additive append-aware command that may return a compact commit delta only when an explicit cursor proves a bounded linear append; every other changed-revision case retains the authoritative full-snapshot fallback.
 
 ## Reproduction
 
@@ -75,7 +75,34 @@ The same post-change 100k legacy comparison produced 36,189,434 B, ~662.79 ms un
 
 Compact encoding is not free: the 100k native conversion plus compact serialization cost ~60.33 ms versus ~34.69 ms to serialize the legacy session. The trade is an additional ~25.6 ms of native encoding work for a ~22.17 MiB smaller IPC document and lower transport-side peak memory. Actual WebView IPC/JSON parse transfer time is not claimed by this benchmark.
 
-The changed-revision path is deliberately conservative. A +1 commit still performs the existing O(N) metadata walk before compact encoding; the post-change legacy comparison measured ~658.96 ms for that full rebuild. Phase 2 does **not** claim an incremental +1 refresh win. A future append-aware delta/cache stage would need an explicit ancestry/cursor contract and deterministic divergence handling before replacing that fallback.
+The Phase-2 changed-revision path is deliberately conservative. A +1 commit still performs the existing O(N) metadata walk before compact encoding; the post-change legacy comparison measured ~658.96 ms for that full rebuild. Phase 2 does **not** claim an incremental +1 refresh win.
+
+### Phase 3 bounded append-aware delta refresh
+
+Phase 3 keeps every Phase-2 and legacy command available and adds `refresh_repository_compact_delta`. The current native app bridge opts into this additive command. Repository authority now stores a compact refresh cursor containing the base revision/HEAD/HEAD-ref, sorted ref/remote/hook metadata, snapshot count/truncation, and the exact `OpenOptions` commit bound. No commit payload is cached in native authority.
+
+The delta path is intentionally narrower than “changed refresh is incremental.” It is eligible only when all of the following are true:
+
+- the base snapshot is metadata-only, attached to a named HEAD, and visibly linear;
+- all base ref targets are represented in that snapshot, making the preserved rev-walk ordering unambiguous;
+- `OpenOptions` still match the cursor and the product-side default remains `max_commits=50_000`;
+- HEAD advances while the same HEAD ref is the only changed ref record; remotes and hooks are unchanged;
+- the new HEAD reaches the cursor HEAD through a single-parent chain within the hard 4,096-commit delta ceiling;
+- revision metadata is re-read after the bounded object walk and still matches, so a concurrent ref move cannot publish a stale delta.
+
+Detached/unborn state, merges, ref additions/removals/moves outside HEAD, force-push/divergence, an option mismatch, an advance beyond 4,096 commits, malformed/missing objects, or any ambiguous base all fail closed to the existing full metadata snapshot. The frontend additionally validates the explicit `baseRevision` and `baseHead`, unchanged HEAD-ref identity, linear parent chain, drop count, and HEAD-ref target before reconstructing the unchanged public `GitRepositorySnapshot` shape. The compact commit batch still rejects eager file lists; Phase-13 file detail remains separately lazy and bounded.
+
+Qualified on 2026-08-23 against the same deterministic histories. The delta payload column is the exact serialized Tauri response shape (`status=delta` plus explicit base revision/head, new revision/head/ref, compact commit batch, refs/remotes/hooks, drop count, and truncation flag), not only the appended commit tuple.
+
+| commits | Phase-2 compact full payload | Phase-3 +1 delta payload | current full +1 refresh | Phase-3 +1 delta refresh | delta conversion | delta JSON | Phase-3 process HWM |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 121,913 B | 779 B | 12.72 ms | 0.69 ms | 0.004 ms | 0.006 ms | 7.16 MiB |
+| 10,000 | 1,252,919 B | 779 B | 68.45 ms | 0.68 ms | 0.003 ms | 0.005 ms | 14.24 MiB |
+| 100,000 | 12,922,925 B (~12.32 MiB) | 779 B | 822.60 ms | 0.72 ms | 0.004 ms | 0.007 ms | 85.45 MiB |
+
+The 100k append fast path is therefore roughly three orders of magnitude lower latency than both the measured Phase-2 full changed refresh (~658.96 ms) and the same-checkout full rerun under current load (822.60 ms), while avoiding retransmission of the ~12.32 MiB compact full snapshot. The current full rerun reached 130.58 MiB HWM; the final append-aware replay remained 85.45 MiB HWM. Cold snapshot construction is intentionally unchanged (695.38 ms in the final Phase-3 100k replay), so this result is specifically a bounded linear-append refresh improvement rather than a reworked native history walk.
+
+The 1k/10k/100k append runs all returned exactly one commit and `dropCommitCount=0`. A separate real-Git regression opens 128 commits through a 64-commit bound, appends one commit, verifies `dropCommitCount=1`, applies the delta, and requires exact equality with an independently rebuilt authoritative full snapshot. Additional regressions require a new ref and rewritten/force-pushed history to return the full-snapshot variant. The Tauri authority test also verifies a successful linear delta, stale expected-revision rejection, and full fallback after a ref-set change.
 
 ### App-local search/index/LOD
 
@@ -91,11 +118,11 @@ The 100k bounded fuzzy probe took 20.41 ms, stopped at exactly 16,384 token comp
 
 ### Current evidence bounds
 
-The present implementation qualifies on this host with these evidence bounds: metadata-only native snapshot open and one-change fallback refresh below 1 s at 100k; active compact native IPC envelope below 13 MiB at 100k while the preserved legacy envelope remains ~34.51 MiB; isolated compact process HWM below 90 MiB at 100k; unchanged revision validation below 1 ms on the qualification fixture; app cold index and scale projection below 1 s at 100k; fuzzy work bounded by configured document/token ceilings. Structural regression tests avoid fragile machine-specific timing assertions but pin deterministic history identity, metadata-only loading, exact compact round-trip, compact payload less than half the legacy 1k JSON, unchanged revision short-circuiting, and the original 512 kB maximum legacy payload for the 1k fixture.
+The present implementation qualifies on this host with these evidence bounds: metadata-only native snapshot open and authoritative full changed fallback below 1 s at 100k; active compact native IPC envelope below 13 MiB at 100k while the preserved legacy envelope remains ~34.51 MiB; an eligible exact +1 append delta below 1 KiB and 1 ms at 1k/10k/100k; isolated compact/delta process HWM below 90 MiB at 100k; unchanged revision validation below 1 ms on the qualification fixture; app cold index and scale projection below 1 s at 100k; fuzzy work bounded by configured document/token ceilings. Structural regression tests avoid fragile machine-specific timing assertions but pin deterministic history identity, metadata-only loading, exact compact round-trip, exact append reconstruction including truncated-tail eviction, fail-closed divergence/ref-set fallback, compact payload less than half the legacy 1k JSON, unchanged revision short-circuiting, and the original 512 kB maximum legacy payload for the 1k fixture.
 
 ## Actionability rules
 
 1. Do not raise the product snapshot limit from its current default solely because the core can walk 100k commits. Tauri compact open/refresh still use `OpenOptions::default()` (`max_commits=50_000`), and this stage intentionally does not change that product bound.
 2. Keep the compact transport metadata-only. Eager diff/blob hydration is explicitly rejected by the encoder; deeper inspection stays on the separately bounded lazy commit-diff path.
-3. Do not call Phase 2 a general incremental refresh. Unchanged revisions short-circuit before the commit walk, but changed revisions intentionally fall back to a complete metadata snapshot. An append-aware or paged delta contract remains a future seam.
+3. Do not generalize the Phase-3 result into “changed refresh is incremental.” Phase 2 unchanged revisions short-circuit before the commit walk; Phase 3 adds only a bounded, validated linear-append fast path. Merges, ref-set changes, force-push/divergence, detached/ambiguous state, cursor/option mismatches, and oversized advances still use the complete metadata snapshot fallback.
 4. Search/index performance belongs to the app-local `GitSearchIndex`. Its current 100k evidence includes conservative owned-byte accounting and explicit fuzzy document/token budgets; native Rust snapshot timing is a separate layer.

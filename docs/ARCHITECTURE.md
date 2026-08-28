@@ -21,7 +21,7 @@
                 │ gix repository access   │
                 │ snapshot/diff/cache      │
                 │ file watching            │
-                │ transaction preview/apply│
+                │ copy-only mutation preview│
                 └─────────────┬────────────┘
                               ▼
                        local repository
@@ -59,7 +59,8 @@ Rust library (and optionally test CLI) responsible for:
 - commit metadata and diff/stat extraction;
 - snapshot revision fingerprinting;
 - file watching and event coalescing;
-- later transaction validation/copy preview/apply support; Phase 4 remains read-only.
+- transaction validation and repository-local copy/sandbox preview support;
+- fail-closed original-apply safety primitives/evidence, without exposing an original-repository executor.
 
 The core must be usable outside Tauri tests.
 
@@ -73,17 +74,21 @@ Tauri IPC uses camelCase JSON matching `@gitinspect/contracts`. Rust structs use
 
 Large content rule: full diffs and blobs are fetched lazily by object/path identity. The initial repository snapshot must stay bounded enough for IPC.
 
-## 4. Phase-4 IPC surface
+## 4. Native IPC surface
 
-The native surface is deliberately narrow and read-only. Repository paths are chosen explicitly, opened once, and represented in the frontend by opaque Rust-owned repository IDs rather than reusable filesystem authority.
+The native repository surface remains deliberately narrow. Repository paths are chosen explicitly, opened once, and represented in the frontend by opaque Rust-owned repository IDs rather than reusable filesystem authority. Initial/refresh transport prefers compact metadata and bounded append deltas; expensive content stays lazy.
 
-Implemented commands:
+Implemented repository commands:
 
 ```text
 choose_repository_path(selection) -> path?
 open_repository(path) -> RepositorySession { key, snapshot }
+open_repository_compact(path) -> CompactRepositorySession
 refresh_repository(repository_id, expected_revision?) -> RepositorySession
+refresh_repository_compact(repository_id, expected_revision?) -> unchanged | compact session
+refresh_repository_compact_delta(repository_id, expected_revision?) -> unchanged | append delta | full compact session
 get_commit_diff(repository_id, oid, options?) -> GitCommitDiff
+get_commit_file_detail(repository_id, oid, path, options?) -> GitCommitFileDetail
 start_repository_watch(repository_id) -> WatchSession { watchId }
 stop_repository_watch(watch_id) -> void
 ```
@@ -94,9 +99,18 @@ Implemented event:
 repository://changed { repositoryId, previousRevision, reasons[] }
 ```
 
-`get_object_details` and progress streaming remain deferred. Full commit diffs are loaded lazily, and server-side bounds cap blob/probe/file limits even when the frontend supplies larger options.
+Implemented mutation-preview commands operate only on gitinspect-owned disposable sandboxes:
 
-Mutation preview/apply commands are also deferred to Phase 5+. Phase 4 exposes no mutation/apply Tauri commands, and original-repository destructive apply remains unavailable.
+```text
+create_mutation_sandbox(repository_id, base_revision) -> MutationSandboxSession
+preview_mutation_transaction(sandbox_id, transaction_id, operations) -> MutationPreviewResult
+confirm_mutation_preview(sandbox_id, transaction_id, preview_token) -> MutationPreviewConfirmation
+cancel_mutation_sandbox(sandbox_id) -> boolean
+```
+
+Generic object-details IPC and repository-open progress streaming remain deferred. Full commit diffs/file details are loaded lazily, and server-side bounds cap blob/probe/file/patch limits even when the frontend requests larger values.
+
+There is deliberately **no original-repository mutation apply command** in the Tauri handler. Phase-31 safety qualification leaves `FinalRepositoryToctou` terminal; preview confirmation does not grant original-apply authority.
 
 ## 5. graph-elements mapping contract
 
@@ -122,7 +136,7 @@ LayoutInput(dataset, previous?, seed, constraints)
   -> LayoutResult(nodePositions, edgeRoutes?, clusters, bounds, diagnostics)
 ```
 
-Git layout constraints include topological Y monotonicity, stable branch lanes, first-parent continuity, and merge convergence. Generic layout code receives these as constraints/weights rather than Git conditionals.
+GitInspect's current app-local Railfield grammar is deterministic and topology-derived: X is oldest→newest topological generation, Y is a stable branch lane with the resolved HEAD first-parent spine on lane 0, and commit ancestry remains on Z=0 while attached signals use shallow semantic depth. Cross-lane ancestry receives explicit controlled peel/convergence routes. Generic graph-elements layout remains Git-agnostic; Git-specific topology and routing live in the app adapter/scale layer rather than identity-hash placement.
 
 ## 7. Picking/interaction architecture
 
@@ -160,7 +174,7 @@ No LOD operation changes domain identity.
 - camera state transition tests;
 - pick-registry/modifier tests;
 - renderer planning tests without WebGL where possible;
-- browser smoke tests for real canvas interaction later.
+- managed-browser visual qualification for real canvas interaction using explicit synthetic/native provenance boundaries.
 
 ### gitinspect-core
 
@@ -182,7 +196,8 @@ No LOD operation changes domain identity.
 
 - Frontend never receives a generic shell command endpoint.
 - Paths are canonicalized and repository handles are server-side opaque IDs after opening.
-- Preview/apply validates that the live revision matches the transaction base.
-- Default preview target is a temporary copy located under gitinspect-managed storage, not bare `/tmp`.
-- Original-repo apply requires a one-time token produced after explicit confirmation.
-- Destructive branch/tag operations remain represented as draft operations until apply.
+- Preview creation validates that the live repository revision matches the transaction base, and stale source state is rejected before sandbox work.
+- Default/only mutation execution target in the current product is a disposable copy located under gitinspect-managed repository-local storage, never bare `/tmp`.
+- Preview confirmation is single-use evidence bound to the preview transaction; it is not an original-repository apply token.
+- The Tauri handler exposes no `apply_mutation` / `apply_to_original` command. Original apply remains NO-GO until a separately authorized safety architecture closes the external-writer whole-source TOCTOU boundary.
+- Branch/tag/rewrite operations remain draft/preview-only with respect to the original repository.
