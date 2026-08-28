@@ -220,7 +220,10 @@ export type MutationKind =
   | "cherry-pick"
   | "rebase-reorder"
   | "squash"
-  | "fixup";
+  | "fixup"
+  | "reword"
+  | "drop"
+  | "split";
 
 export interface MutationOperation {
   readonly id: string;

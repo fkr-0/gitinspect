@@ -390,8 +390,21 @@ fn operation_matrix_keeps_every_previewable_kind_fail_closed() {
         },
         MutationPreviewOperation::Fixup {
             branch: "main".to_owned(),
-            onto_oid: oid_a,
-            commit_oids: vec![oid_b],
+            onto_oid: oid_a.clone(),
+            commit_oids: vec![oid_b.clone()],
+        },
+        MutationPreviewOperation::Reword {
+            branch: "main".to_owned(),
+            commit_oid: oid_a.clone(),
+            message: "replacement subject".to_owned(),
+        },
+        MutationPreviewOperation::Drop {
+            branch: "main".to_owned(),
+            commit_oid: oid_a,
+        },
+        MutationPreviewOperation::Split {
+            branch: "main".to_owned(),
+            commit_oid: oid_b,
         },
     ];
 

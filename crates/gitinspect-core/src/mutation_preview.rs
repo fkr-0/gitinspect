@@ -21,6 +21,18 @@ use crate::{GitRepositorySnapshot, OpenOptions, RefKind, RepositoryHandle, Repos
 
 const MAX_OPERATIONS: usize = 64;
 const MAX_REWRITE_COMMITS: usize = 64;
+const MAX_REWORD_MESSAGE_BYTES: usize = 4096;
+const MAX_SPLIT_PATHS: usize = 64;
+// The transformed-topology payload is a bounded visualization authority, not a
+// second unbounded repository snapshot. The backend transaction may accept up
+// to 64 operations, while the normal tray accepts eight; 512 commit records is
+// sufficient for the full tray rewrite envelope and larger direct callers fail
+// soft through `truncated=true` rather than expanding renderer authority.
+const MAX_PREVIEW_GRAPH_DELTA_COMMITS: usize = 512;
+const MAX_PREVIEW_GRAPH_DELTA_REFS: usize = MAX_OPERATIONS * 2;
+const MAX_PREVIEW_GRAPH_DELTA_PARENTS: usize = 64;
+const MAX_PREVIEW_GRAPH_MESSAGE_BYTES: usize = 4096;
+const MAX_PREVIEW_GRAPH_IDENTITY_BYTES: usize = 512;
 const MAX_TRANSACTION_ID_BYTES: usize = 128;
 const MAX_REF_NAME_BYTES: usize = 255;
 const MAX_COMMAND_MESSAGE_BYTES: usize = 4096;
@@ -75,6 +87,191 @@ pub enum MutationPreviewOperation {
         onto_oid: String,
         commit_oids: Vec<String>,
     },
+    Reword {
+        branch: String,
+        commit_oid: String,
+        message: String,
+    },
+    Drop {
+        branch: String,
+        commit_oid: String,
+    },
+    Split {
+        branch: String,
+        commit_oid: String,
+    },
+}
+
+fn split_failure(
+    operation_index: usize,
+    operation: &MutationPreviewOperation,
+    message: &str,
+) -> MutationPreviewFailure {
+    MutationPreviewFailure {
+        operation_index,
+        operation_kind: operation.kind_name().to_owned(),
+        code: "invalid-split".to_owned(),
+        message: message.to_owned(),
+        conflicts: Vec::new(),
+    }
+}
+
+fn bounded_preview_text(value: &str, max_bytes: usize) -> (String, bool) {
+    if value.len() <= max_bytes {
+        return (value.to_owned(), false);
+    }
+    let mut end = max_bytes;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    (value[..end].to_owned(), true)
+}
+
+fn preview_graph_delta(
+    snapshot: &GitRepositorySnapshot,
+    changed_refs: &[MutationChangedRef],
+    rewritten: &[MutationRewrittenCommit],
+    cascade: &[MutationHashCascadeEntry],
+) -> MutationPreviewGraphDelta {
+    let mut wanted = rewritten
+        .iter()
+        .map(|entry| entry.new_oid.as_str())
+        .chain(cascade.iter().map(|entry| entry.new_oid.as_str()))
+        .collect::<Vec<_>>();
+    wanted.extend(
+        changed_refs
+            .iter()
+            .filter_map(|entry| entry.after_oid.as_deref()),
+    );
+    wanted.sort();
+    wanted.dedup();
+    let wanted_count = wanted.len();
+    let wanted = wanted
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+
+    let mut candidate_commits = snapshot
+        .commits
+        .iter()
+        .filter(|commit| wanted.contains(commit.oid.as_str()))
+        .collect::<Vec<_>>();
+    candidate_commits.sort_by(|left, right| left.oid.cmp(&right.oid));
+    let discovered_commit_count = candidate_commits.len();
+    candidate_commits.truncate(MAX_PREVIEW_GRAPH_DELTA_COMMITS);
+
+    let mut content_truncated = false;
+    let commits = candidate_commits
+        .into_iter()
+        .map(|commit| {
+            let mut parents = commit.parents.clone();
+            if parents.len() > MAX_PREVIEW_GRAPH_DELTA_PARENTS {
+                parents.truncate(MAX_PREVIEW_GRAPH_DELTA_PARENTS);
+                content_truncated = true;
+            }
+            let (message, message_truncated) =
+                bounded_preview_text(&commit.message, MAX_PREVIEW_GRAPH_MESSAGE_BYTES);
+            let (author_name, author_name_truncated) =
+                bounded_preview_text(&commit.author_name, MAX_PREVIEW_GRAPH_IDENTITY_BYTES);
+            let author_email = commit.author_email.as_deref().map(|value| {
+                let (bounded, truncated) =
+                    bounded_preview_text(value, MAX_PREVIEW_GRAPH_IDENTITY_BYTES);
+                content_truncated |= truncated;
+                bounded
+            });
+            content_truncated |= message_truncated || author_name_truncated;
+            MutationPreviewGraphCommit {
+                oid: commit.oid.clone(),
+                parents,
+                message,
+                author_name,
+                author_email,
+                authored_at_ms: commit.authored_at_ms,
+                committed_at_ms: commit.committed_at_ms,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let changed_names = changed_refs
+        .iter()
+        .filter(|entry| entry.after_oid.is_some())
+        .map(|entry| entry.name.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let changed_name_count = changed_names.len();
+    let mut refs = snapshot
+        .refs
+        .iter()
+        .filter(|reference| changed_names.contains(reference.name.as_str()))
+        .map(|reference| MutationPreviewGraphRef {
+            name: reference.name.clone(),
+            target_oid: reference.target_oid.clone(),
+            kind: match reference.kind {
+                RefKind::LocalBranch => "local-branch",
+                RefKind::Tag => "tag",
+                RefKind::RemoteBranch => "remote-branch",
+                RefKind::Stash => "stash",
+                _ => "ref",
+            }
+            .to_owned(),
+        })
+        .collect::<Vec<_>>();
+    refs.sort_by(|left, right| left.name.cmp(&right.name));
+    let discovered_ref_count = refs.len();
+    refs.truncate(MAX_PREVIEW_GRAPH_DELTA_REFS);
+
+    MutationPreviewGraphDelta {
+        truncated: content_truncated
+            || discovered_commit_count < wanted_count
+            || discovered_commit_count > MAX_PREVIEW_GRAPH_DELTA_COMMITS
+            || discovered_ref_count < changed_name_count
+            || discovered_ref_count > MAX_PREVIEW_GRAPH_DELTA_REFS,
+        commits,
+        refs,
+    }
+}
+
+fn validate_reword_message(value: &str) -> Result<(), MutationPreviewError> {
+    if value.trim().is_empty() || value.len() > MAX_REWORD_MESSAGE_BYTES || value.contains('\0') {
+        return Err(MutationPreviewError::InvalidInput(format!(
+            "reword message must be non-empty, NUL-free, and at most {MAX_REWORD_MESSAGE_BYTES} bytes"
+        )));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MutationDroppedCommit {
+    pub old_oid: String,
+    pub operation_index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MutationPreviewGraphCommit {
+    pub oid: String,
+    pub parents: Vec<String>,
+    pub message: String,
+    pub author_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author_email: Option<String>,
+    pub authored_at_ms: i64,
+    pub committed_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MutationPreviewGraphRef {
+    pub name: String,
+    pub target_oid: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MutationPreviewGraphDelta {
+    pub commits: Vec<MutationPreviewGraphCommit>,
+    pub refs: Vec<MutationPreviewGraphRef>,
+    pub truncated: bool,
 }
 
 impl MutationPreviewOperation {
@@ -90,6 +287,9 @@ impl MutationPreviewOperation {
             Self::RebaseReorder { .. } => "rebase-reorder",
             Self::Squash { .. } => "squash",
             Self::Fixup { .. } => "fixup",
+            Self::Reword { .. } => "reword",
+            Self::Drop { .. } => "drop",
+            Self::Split { .. } => "split",
         }
     }
 
@@ -176,6 +376,26 @@ impl MutationPreviewOperation {
                 commit_oids.len(),
                 oid_list(commit_oids)
             ),
+            Self::Reword {
+                branch,
+                commit_oid,
+                message,
+            } => format!(
+                "reword|{}|{}|{}",
+                field("branch", branch),
+                field("commit", commit_oid),
+                field("message", message)
+            ),
+            Self::Drop { branch, commit_oid } => format!(
+                "drop|{}|{}",
+                field("branch", branch),
+                field("commit", commit_oid)
+            ),
+            Self::Split { branch, commit_oid } => format!(
+                "split|{}|{}",
+                field("branch", branch),
+                field("commit", commit_oid)
+            ),
         }
     }
 }
@@ -258,6 +478,8 @@ pub struct MutationPreviewResult {
     pub changed_refs: Vec<MutationChangedRef>,
     pub rewritten_commits: Vec<MutationRewrittenCommit>,
     pub hash_cascade: Vec<MutationHashCascadeEntry>,
+    pub dropped_commits: Vec<MutationDroppedCommit>,
+    pub graph_delta: MutationPreviewGraphDelta,
     pub warnings: Vec<String>,
     pub failures: Vec<MutationPreviewFailure>,
     pub success: bool,
@@ -453,6 +675,7 @@ impl MutationSandboxManager {
             operation_digest(transaction_id, &entry.base_revision, &canonical_operations);
         let mut rewritten_commits = Vec::new();
         let mut hash_cascade = Vec::new();
+        let mut dropped_commits = Vec::new();
         let mut warnings = vec![
             "Preview uses committed Git object/ref state only; the original index and worktree are never copied or mutated."
                 .to_owned(),
@@ -460,14 +683,13 @@ impl MutationSandboxManager {
         let mut failures = Vec::new();
 
         for (operation_index, operation) in operations.iter().enumerate() {
-            match self.execute_operation(
-                &entry.path,
-                operation_index,
-                operation,
-                &mut rewritten_commits,
-                &mut hash_cascade,
-                &mut warnings,
-            )? {
+            let mut evidence = OperationEvidence {
+                rewritten: &mut rewritten_commits,
+                cascade: &mut hash_cascade,
+                dropped: &mut dropped_commits,
+                warnings: &mut warnings,
+            };
+            match self.execute_operation(&entry.path, operation_index, operation, &mut evidence)? {
                 OperationExecution::Success => {}
                 OperationExecution::Failure(failure) => {
                     failures.push(failure);
@@ -485,6 +707,12 @@ impl MutationSandboxManager {
         ensure_revision(&entry.base_revision, &live_after.revision)?;
         let after = summarize_snapshot(&after_snapshot);
         let changed_refs = changed_refs(&entry.before, &after);
+        let graph_delta = preview_graph_delta(
+            &after_snapshot,
+            &changed_refs,
+            &rewritten_commits,
+            &hash_cascade,
+        );
         let preview_token = token_for(
             "preview",
             &[
@@ -521,6 +749,8 @@ impl MutationSandboxManager {
             changed_refs,
             rewritten_commits,
             hash_cascade,
+            dropped_commits,
+            graph_delta,
             warnings,
             success: failures.is_empty(),
             failures,
@@ -639,9 +869,7 @@ impl MutationSandboxManager {
         path: &Path,
         operation_index: usize,
         operation: &MutationPreviewOperation,
-        rewritten: &mut Vec<MutationRewrittenCommit>,
-        cascade: &mut Vec<MutationHashCascadeEntry>,
-        warnings: &mut Vec<String>,
+        evidence: &mut OperationEvidence<'_>,
     ) -> Result<OperationExecution, MutationPreviewError> {
         match operation {
             MutationPreviewOperation::BranchCreate { name, target_oid } => {
@@ -687,14 +915,17 @@ impl MutationSandboxManager {
                     )?));
                 }
                 let new_oid = self.head_oid(path)?;
-                let mut evidence = RewriteEvidence { rewritten, cascade };
+                let mut rewrite_evidence = RewriteEvidence {
+                    rewritten: &mut *evidence.rewritten,
+                    cascade: &mut *evidence.cascade,
+                };
                 self.record_rewrite(
                     path,
                     operation_index,
                     "cherry-pick",
                     commit_oid,
                     &new_oid,
-                    &mut evidence,
+                    &mut rewrite_evidence,
                 )?;
                 Ok(OperationExecution::Success)
             }
@@ -721,7 +952,10 @@ impl MutationSandboxManager {
                 {
                     return Ok(OperationExecution::Failure(failure));
                 }
-                let mut evidence = RewriteEvidence { rewritten, cascade };
+                let mut rewrite_evidence = RewriteEvidence {
+                    rewritten: &mut *evidence.rewritten,
+                    cascade: &mut *evidence.cascade,
+                };
                 for old_oid in commit_oids {
                     let output = self.run_git(path, ["cherry-pick", old_oid.as_str()])?;
                     if !output.status.success() {
@@ -739,7 +973,7 @@ impl MutationSandboxManager {
                         "rebase-reorder",
                         old_oid,
                         &new_oid,
-                        &mut evidence,
+                        &mut rewrite_evidence,
                     )?;
                 }
                 Ok(OperationExecution::Success)
@@ -756,9 +990,9 @@ impl MutationSandboxManager {
                 onto_oid,
                 commit_oids,
                 "squash",
-                rewritten,
-                cascade,
-                warnings,
+                &mut *evidence.rewritten,
+                &mut *evidence.cascade,
+                &mut *evidence.warnings,
             ),
             MutationPreviewOperation::Fixup {
                 branch,
@@ -772,11 +1006,403 @@ impl MutationSandboxManager {
                 onto_oid,
                 commit_oids,
                 "fixup",
-                rewritten,
-                cascade,
-                warnings,
+                &mut *evidence.rewritten,
+                &mut *evidence.cascade,
+                &mut *evidence.warnings,
+            ),
+            MutationPreviewOperation::Reword {
+                branch,
+                commit_oid,
+                message,
+            } => self.execute_reword_preview(
+                path,
+                operation_index,
+                operation,
+                branch,
+                commit_oid,
+                message,
+                &mut *evidence.rewritten,
+                &mut *evidence.cascade,
+            ),
+            MutationPreviewOperation::Drop { branch, commit_oid } => self.execute_drop_preview(
+                path,
+                operation_index,
+                operation,
+                branch,
+                commit_oid,
+                &mut *evidence.rewritten,
+                &mut *evidence.cascade,
+                &mut *evidence.dropped,
+            ),
+            MutationPreviewOperation::Split { branch, commit_oid } => self.execute_split_preview(
+                path,
+                operation_index,
+                operation,
+                branch,
+                commit_oid,
+                &mut *evidence.rewritten,
+                &mut *evidence.cascade,
             ),
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn execute_reword_preview(
+        &self,
+        path: &Path,
+        operation_index: usize,
+        operation: &MutationPreviewOperation,
+        branch: &str,
+        commit_oid: &str,
+        message: &str,
+        rewritten: &mut Vec<MutationRewrittenCommit>,
+        cascade: &mut Vec<MutationHashCascadeEntry>,
+    ) -> Result<OperationExecution, MutationPreviewError> {
+        let (parent, suffix) =
+            match self.linear_suffix(path, operation_index, operation, branch, commit_oid)? {
+                Ok(value) => value,
+                Err(failure) => return Ok(OperationExecution::Failure(failure)),
+            };
+        if let Some(failure) =
+            self.checkout_and_reset(path, operation_index, operation, branch, &parent)?
+        {
+            return Ok(OperationExecution::Failure(failure));
+        }
+        let output = self.run_git(path, ["cherry-pick", commit_oid])?;
+        if !output.status.success() {
+            return Ok(OperationExecution::Failure(self.failure_from_output(
+                path,
+                operation_index,
+                operation,
+                &output,
+            )?));
+        }
+        let amend = self.run_git(path, ["commit", "--amend", "--no-gpg-sign", "-m", message])?;
+        if !amend.status.success() {
+            return Ok(OperationExecution::Failure(self.failure_from_output(
+                path,
+                operation_index,
+                operation,
+                &amend,
+            )?));
+        }
+        let mut evidence = RewriteEvidence { rewritten, cascade };
+        let new_oid = self.head_oid(path)?;
+        self.record_rewrite(
+            path,
+            operation_index,
+            "reword",
+            commit_oid,
+            &new_oid,
+            &mut evidence,
+        )?;
+        for old_oid in suffix.iter().skip(1) {
+            let output = self.run_git(path, ["cherry-pick", old_oid.as_str()])?;
+            if !output.status.success() {
+                return Ok(OperationExecution::Failure(self.failure_from_output(
+                    path,
+                    operation_index,
+                    operation,
+                    &output,
+                )?));
+            }
+            let new_oid = self.head_oid(path)?;
+            self.record_rewrite(
+                path,
+                operation_index,
+                "reword-descendant",
+                old_oid,
+                &new_oid,
+                &mut evidence,
+            )?;
+        }
+        Ok(OperationExecution::Success)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn execute_drop_preview(
+        &self,
+        path: &Path,
+        operation_index: usize,
+        operation: &MutationPreviewOperation,
+        branch: &str,
+        commit_oid: &str,
+        rewritten: &mut Vec<MutationRewrittenCommit>,
+        cascade: &mut Vec<MutationHashCascadeEntry>,
+        dropped: &mut Vec<MutationDroppedCommit>,
+    ) -> Result<OperationExecution, MutationPreviewError> {
+        let (parent, suffix) =
+            match self.linear_suffix(path, operation_index, operation, branch, commit_oid)? {
+                Ok(value) => value,
+                Err(failure) => return Ok(OperationExecution::Failure(failure)),
+            };
+        if let Some(failure) =
+            self.checkout_and_reset(path, operation_index, operation, branch, &parent)?
+        {
+            return Ok(OperationExecution::Failure(failure));
+        }
+        let mut evidence = RewriteEvidence { rewritten, cascade };
+        for old_oid in suffix.iter().skip(1) {
+            let output = self.run_git(path, ["cherry-pick", old_oid.as_str()])?;
+            if !output.status.success() {
+                return Ok(OperationExecution::Failure(self.failure_from_output(
+                    path,
+                    operation_index,
+                    operation,
+                    &output,
+                )?));
+            }
+            let new_oid = self.head_oid(path)?;
+            self.record_rewrite(
+                path,
+                operation_index,
+                "drop-descendant",
+                old_oid,
+                &new_oid,
+                &mut evidence,
+            )?;
+        }
+        dropped.push(MutationDroppedCommit {
+            old_oid: commit_oid.to_owned(),
+            operation_index,
+        });
+        Ok(OperationExecution::Success)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn execute_split_preview(
+        &self,
+        path: &Path,
+        operation_index: usize,
+        operation: &MutationPreviewOperation,
+        branch: &str,
+        commit_oid: &str,
+        rewritten: &mut Vec<MutationRewrittenCommit>,
+        cascade: &mut Vec<MutationHashCascadeEntry>,
+    ) -> Result<OperationExecution, MutationPreviewError> {
+        let (parent, suffix) =
+            match self.linear_suffix(path, operation_index, operation, branch, commit_oid)? {
+                Ok(value) => value,
+                Err(failure) => return Ok(OperationExecution::Failure(failure)),
+            };
+        let paths = match self.split_paths(path, operation_index, operation, &parent, commit_oid)? {
+            Ok(value) => value,
+            Err(failure) => return Ok(OperationExecution::Failure(failure)),
+        };
+        if let Some(failure) =
+            self.checkout_and_reset(path, operation_index, operation, branch, &parent)?
+        {
+            return Ok(OperationExecution::Failure(failure));
+        }
+        let midpoint = paths.len() / 2;
+        let mut evidence = RewriteEvidence { rewritten, cascade };
+        for group in [&paths[..midpoint], &paths[midpoint..]] {
+            let mut args = vec![
+                OsString::from("checkout"),
+                OsString::from(commit_oid),
+                OsString::from("--"),
+            ];
+            args.extend(group.iter().map(OsString::from));
+            let checkout = self.run_git(path, &args)?;
+            if !checkout.status.success() {
+                return Ok(OperationExecution::Failure(self.failure_from_output(
+                    path,
+                    operation_index,
+                    operation,
+                    &checkout,
+                )?));
+            }
+            let commit = self.run_git(path, ["commit", "--no-gpg-sign", "-C", commit_oid])?;
+            if !commit.status.success() {
+                return Ok(OperationExecution::Failure(self.failure_from_output(
+                    path,
+                    operation_index,
+                    operation,
+                    &commit,
+                )?));
+            }
+            let new_oid = self.head_oid(path)?;
+            self.record_rewrite(
+                path,
+                operation_index,
+                "split",
+                commit_oid,
+                &new_oid,
+                &mut evidence,
+            )?;
+        }
+        for old_oid in suffix.iter().skip(1) {
+            let output = self.run_git(path, ["cherry-pick", old_oid.as_str()])?;
+            if !output.status.success() {
+                return Ok(OperationExecution::Failure(self.failure_from_output(
+                    path,
+                    operation_index,
+                    operation,
+                    &output,
+                )?));
+            }
+            let new_oid = self.head_oid(path)?;
+            self.record_rewrite(
+                path,
+                operation_index,
+                "split-descendant",
+                old_oid,
+                &new_oid,
+                &mut evidence,
+            )?;
+        }
+        Ok(OperationExecution::Success)
+    }
+
+    fn linear_suffix(
+        &self,
+        path: &Path,
+        operation_index: usize,
+        operation: &MutationPreviewOperation,
+        branch: &str,
+        commit_oid: &str,
+    ) -> Result<Result<(String, Vec<String>), MutationPreviewFailure>, MutationPreviewError> {
+        let parents = self.run_git(path, ["show", "-s", "--format=%P", commit_oid])?;
+        if !parents.status.success() {
+            return Ok(Err(self.failure_from_output(
+                path,
+                operation_index,
+                operation,
+                &parents,
+            )?));
+        }
+        let parent_oids = String::from_utf8_lossy(&parents.stdout)
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        if parent_oids.len() != 1 {
+            return Ok(Err(validation_failure(
+                operation_index,
+                operation,
+                "reword/drop/split requires a non-root, non-merge commit on a linear branch suffix",
+            )));
+        }
+        let parent = parent_oids[0].clone();
+        let exclude = format!("^{parent}");
+        let range = self.run_git(path, ["rev-list", "--reverse", branch, exclude.as_str()])?;
+        if !range.status.success() {
+            return Ok(Err(self.failure_from_output(
+                path,
+                operation_index,
+                operation,
+                &range,
+            )?));
+        }
+        let suffix = String::from_utf8_lossy(&range.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        if suffix.first().map(String::as_str) != Some(commit_oid)
+            || suffix.len() > MAX_REWRITE_COMMITS
+        {
+            return Ok(Err(validation_failure(
+                operation_index,
+                operation,
+                "target commit must begin a bounded linear suffix of the selected branch",
+            )));
+        }
+        for oid in &suffix {
+            let parents = self.run_git(path, ["show", "-s", "--format=%P", oid.as_str()])?;
+            if !parents.status.success()
+                || String::from_utf8_lossy(&parents.stdout)
+                    .split_whitespace()
+                    .count()
+                    > 1
+            {
+                return Ok(Err(validation_failure(
+                    operation_index,
+                    operation,
+                    "merge commits are not supported by the linear rewrite preview",
+                )));
+            }
+        }
+        Ok(Ok((parent, suffix)))
+    }
+
+    fn split_paths(
+        &self,
+        path: &Path,
+        operation_index: usize,
+        operation: &MutationPreviewOperation,
+        parent_oid: &str,
+        commit_oid: &str,
+    ) -> Result<Result<Vec<String>, MutationPreviewFailure>, MutationPreviewError> {
+        let output = self.run_git(
+            path,
+            [
+                "diff-tree",
+                "--no-commit-id",
+                "--name-status",
+                "-z",
+                "--no-renames",
+                "-r",
+                parent_oid,
+                commit_oid,
+            ],
+        )?;
+        if !output.status.success() {
+            return Ok(Err(self.failure_from_output(
+                path,
+                operation_index,
+                operation,
+                &output,
+            )?));
+        }
+        let parts = output
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        if parts.len() % 2 != 0 {
+            return Ok(Err(split_failure(
+                operation_index,
+                operation,
+                "unable to parse authoritative commit path changes",
+            )));
+        }
+        let mut paths = Vec::new();
+        for pair in parts.chunks_exact(2) {
+            let status = String::from_utf8_lossy(pair[0]);
+            if status != "A" && status != "M" {
+                return Ok(Err(split_failure(
+                    operation_index,
+                    operation,
+                    "split preview currently accepts only added or modified paths; deletes, renames, copies, and type changes fail closed",
+                )));
+            }
+            let Ok(path) = String::from_utf8(pair[1].to_vec()) else {
+                return Ok(Err(split_failure(
+                    operation_index,
+                    operation,
+                    "split preview requires UTF-8 repository paths",
+                )));
+            };
+            if path.is_empty() || path.len() > 4096 {
+                return Ok(Err(split_failure(
+                    operation_index,
+                    operation,
+                    "split preview path length is outside the bounded contract",
+                )));
+            }
+            paths.push(path);
+        }
+        paths.sort();
+        paths.dedup();
+        if paths.len() < 2 || paths.len() > MAX_SPLIT_PATHS {
+            return Ok(Err(split_failure(
+                operation_index,
+                operation,
+                "split preview requires 2-64 authoritative changed paths",
+            )));
+        }
+        Ok(Ok(paths))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1092,6 +1718,13 @@ struct RewriteRange<'a> {
     allow_permutation: bool,
 }
 
+struct OperationEvidence<'a> {
+    rewritten: &'a mut Vec<MutationRewrittenCommit>,
+    cascade: &'a mut Vec<MutationHashCascadeEntry>,
+    dropped: &'a mut Vec<MutationDroppedCommit>,
+    warnings: &'a mut Vec<String>,
+}
+
 struct RewriteEvidence<'a> {
     rewritten: &'a mut Vec<MutationRewrittenCommit>,
     cascade: &'a mut Vec<MutationHashCascadeEntry>,
@@ -1193,6 +1826,20 @@ fn validate_operations(
                         "rewrite preview commit list contains duplicates".to_owned(),
                     ));
                 }
+            }
+            MutationPreviewOperation::Reword {
+                branch,
+                commit_oid,
+                message,
+            } => {
+                validate_ref_name(branch)?;
+                validate_oid(commit_oid)?;
+                validate_reword_message(message)?;
+            }
+            MutationPreviewOperation::Drop { branch, commit_oid }
+            | MutationPreviewOperation::Split { branch, commit_oid } => {
+                validate_ref_name(branch)?;
+                validate_oid(commit_oid)?;
             }
         }
     }

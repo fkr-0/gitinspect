@@ -610,7 +610,10 @@ pub fn qualify_mutation_operation(
         MutationPreviewOperation::CherryPick { .. }
         | MutationPreviewOperation::RebaseReorder { .. }
         | MutationPreviewOperation::Squash { .. }
-        | MutationPreviewOperation::Fixup { .. } => (
+        | MutationPreviewOperation::Fixup { .. }
+        | MutationPreviewOperation::Reword { .. }
+        | MutationPreviewOperation::Drop { .. }
+        | MutationPreviewOperation::Split { .. } => (
             MutationEffectClass::RewriteWithObjectIndexWorktreeEffects,
             "rewrite may create objects and change refs/index/worktree across multiple crash points",
             vec![
