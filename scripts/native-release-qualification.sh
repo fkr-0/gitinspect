@@ -12,12 +12,118 @@ readonly REQUIRED_RUNS=3
 readonly READY_MARKER='MUTATION_PREVIEW_NATIVE_SMOKE_PROGRESS=headed native focus handoff ready after GraphScene/WebGL convergence…'
 readonly EXPECTED_SELECTED_ID='commit:ffffffffffffffffffffffffffffffff00000003'
 readonly EXPECTED_CLASS='mutation_preview_native_smoke'
+readonly EXPECTED_WM_CLASS='"mutation_preview_native_smoke", "Mutation_preview_native_smoke"'
 readonly EXPECTED_TITLE='gitinspect'
 readonly SERVER_URL='http://127.0.0.1:1420/mutation-preview-native-smoke.html'
 
 runs=$REQUIRED_RUNS
 requested_workspace=${GITINSPECT_NATIVE_WORKSPACE:-}
 summary_path=''
+self_test=0
+
+classify_headed_runner() {
+  local executable=${1:-}
+  local argv=${2:-}
+  local base=${executable##*/}
+
+  case "$base" in
+    mutation_preview_native_smoke|native_visual_smoke|native_bridge_smoke|gitinspect)
+      printf '%s\n' "$base"
+      return 0
+      ;;
+    node)
+      if [[ "$argv" =~ (^|[[:space:]])([^[:space:]]*/)?mutation-preview-headed-webgl\.mjs([[:space:]]|$) ]]; then
+        printf '%s\n' 'browser-headed-webgl'
+        return 0
+      fi
+      ;;
+    cargo)
+      if [[ "$argv" =~ (^|[[:space:]])--bin(=|[[:space:]]+)mutation_preview_native_smoke([[:space:]]|$) ]]; then
+        printf '%s\n' 'cargo-mutation-preview-native-smoke'
+        return 0
+      fi
+      if [[ "$argv" =~ (^|[[:space:]])--bin(=|[[:space:]]+)native_visual_smoke([[:space:]]|$) ]]; then
+        printf '%s\n' 'cargo-native-visual-smoke'
+        return 0
+      fi
+      if [[ "$argv" =~ (^|[[:space:]])--bin(=|[[:space:]]+)native_bridge_smoke([[:space:]]|$) ]]; then
+        printf '%s\n' 'cargo-native-bridge-smoke'
+        return 0
+      fi
+      ;;
+  esac
+  return 1
+}
+
+wm_class_matches_expected() {
+  [[ ${1:-} == "$EXPECTED_WM_CLASS" ]]
+}
+
+transition_is_unrelated_after_handoff() {
+  local phase=${1:-}
+  local active_window=${2:-0x0}
+  local target_window=${3:-0x0}
+  [[ "$phase" == 'post-handoff' && "$active_window" != "$target_window" && "$active_window" != '0x0' ]]
+}
+
+run_self_test() {
+  local failures=0 actual=''
+
+  assert_runner() {
+    local expected=$1 executable=$2 argv=$3
+    actual=$(classify_headed_runner "$executable" "$argv" 2>/dev/null || true)
+    if [[ "$actual" != "$expected" ]]; then
+      printf 'self_test_failure=runner expected=%s actual=%s executable=%s argv=%s\n' "$expected" "$actual" "$executable" "$argv" >&2
+      failures=$((failures + 1))
+    fi
+  }
+
+  assert_no_runner() {
+    local executable=$1 argv=$2
+    actual=$(classify_headed_runner "$executable" "$argv" 2>/dev/null || true)
+    if [[ -n "$actual" ]]; then
+      printf 'self_test_failure=false-positive runner=%s executable=%s argv=%s\n' "$actual" "$executable" "$argv" >&2
+      failures=$((failures + 1))
+    fi
+  }
+
+  assert_runner mutation_preview_native_smoke /repo/target/debug/mutation_preview_native_smoke '/repo/target/debug/mutation_preview_native_smoke'
+  assert_runner gitinspect /usr/bin/gitinspect '/usr/bin/gitinspect'
+  assert_runner cargo-mutation-preview-native-smoke /usr/bin/cargo 'cargo run --manifest-path app/Cargo.toml --bin mutation_preview_native_smoke'
+  assert_runner cargo-mutation-preview-native-smoke /usr/bin/cargo 'cargo run --bin=mutation_preview_native_smoke'
+  assert_runner cargo-native-visual-smoke /usr/bin/cargo 'cargo run --bin native_visual_smoke'
+  assert_runner cargo-native-bridge-smoke /usr/bin/cargo 'cargo run --bin native_bridge_smoke'
+  assert_runner browser-headed-webgl /usr/bin/node 'node /repo/scripts/mutation-preview-headed-webgl.mjs --headed'
+  assert_no_runner /usr/bin/cargo 'cargo run --bin mutation_preview_native_smoke_extra'
+  assert_no_runner /usr/bin/node 'node /repo/scripts/mutation-preview-headed-webgl.mjs.backup'
+  assert_no_runner /usr/bin/bash 'bash -c echo mutation_preview_native_smoke'
+
+  wm_class_matches_expected "$EXPECTED_WM_CLASS" || { echo 'self_test_failure=exact WM_CLASS rejected' >&2; failures=$((failures + 1)); }
+  if wm_class_matches_expected '"mutation_preview_native_smoke", "Other"'; then
+    echo 'self_test_failure=non-exact WM_CLASS accepted' >&2
+    failures=$((failures + 1))
+  fi
+
+  transition_is_unrelated_after_handoff post-handoff 0x99 0x42 || { echo 'self_test_failure=post-handoff unrelated transition missed' >&2; failures=$((failures + 1)); }
+  if transition_is_unrelated_after_handoff pre-handoff 0x99 0x42; then
+    echo 'self_test_failure=pre-handoff transition misclassified' >&2
+    failures=$((failures + 1))
+  fi
+  if transition_is_unrelated_after_handoff post-handoff 0x42 0x42; then
+    echo 'self_test_failure=target transition misclassified' >&2
+    failures=$((failures + 1))
+  fi
+  if transition_is_unrelated_after_handoff post-handoff 0x0 0x42; then
+    echo 'self_test_failure=zero active window misclassified' >&2
+    failures=$((failures + 1))
+  fi
+
+  if ((failures != 0)); then
+    printf 'NATIVE_RELEASE_QUALIFICATION_SELF_TEST=FAIL failures=%d\n' "$failures" >&2
+    return 1
+  fi
+  echo 'NATIVE_RELEASE_QUALIFICATION_SELF_TEST=PASS'
+}
 
 usage() {
   cat <<'EOF'
@@ -28,6 +134,7 @@ Options:
   --workspace NAME  Use NAME only if it does not already exist in i3.
                     Without this flag, the gate discovers an absent numeric workspace.
   --summary PATH    Write machine-readable JSON provenance to PATH.
+  --self-test       Run pure provenance/classification regressions only.
   -h, --help        Show this help.
 
 The gate is intentionally fail-closed. It requires X11+i3, an absent workspace that
@@ -54,6 +161,9 @@ while (($# > 0)); do
       summary_path=$2
       shift
       ;;
+    --self-test)
+      self_test=1
+      ;;
     -h|--help)
       usage
       exit 0
@@ -66,6 +176,11 @@ while (($# > 0)); do
   esac
   shift
 done
+
+if ((self_test)); then
+  run_self_test
+  exit $?
+fi
 
 [[ "$runs" =~ ^[0-9]+$ ]] || { echo '--runs must be an integer' >&2; exit 64; }
 ((runs >= REQUIRED_RUNS)) || {
@@ -176,30 +291,15 @@ window_workspace() {
 }
 
 headed_runner_processes() {
-  ps -ww -eo pid=,args= | awk '
-    {
-      pid = $1
-      executable = $2
-      base = executable
-      sub(/^.*\//, "", base)
-    }
-    base == "mutation_preview_native_smoke" { print pid "\tmutation_preview_native_smoke\t" $0; next }
-    base == "native_visual_smoke" { print pid "\tnative_visual_smoke\t" $0; next }
-    base == "native_bridge_smoke" { print pid "\tnative_bridge_smoke\t" $0; next }
-    base == "gitinspect" { print pid "\tgitinspect\t" $0; next }
-    base == "node" && index($0, "mutation-preview-headed-webgl.mjs") {
-      print pid "\tbrowser-headed-webgl\t" $0; next
-    }
-    base == "cargo" && index($0, "--bin mutation_preview_native_smoke") {
-      print pid "\tcargo-mutation-preview-native-smoke\t" $0; next
-    }
-    base == "cargo" && index($0, "--bin native_visual_smoke") {
-      print pid "\tcargo-native-visual-smoke\t" $0; next
-    }
-    base == "cargo" && index($0, "--bin native_bridge_smoke") {
-      print pid "\tcargo-native-bridge-smoke\t" $0; next
-    }
-  '
+  local pid executable rest argv kind
+  while read -r pid executable rest; do
+    [[ -n "$pid" && -n "$executable" ]] || continue
+    argv=$executable
+    [[ -n "$rest" ]] && argv+=" $rest"
+    kind=$(classify_headed_runner "$executable" "$argv" 2>/dev/null || true)
+    [[ -n "$kind" ]] || continue
+    printf '%s\t%s\t%s %s\n' "$pid" "$kind" "$pid" "$argv"
+  done < <(ps -ww -eo pid=,args=)
 }
 
 native_smoke_process_count() {
@@ -372,7 +472,7 @@ switched_workspace=1
 
 monitor_active_windows() {
   local transitions=$1 target_file=$2 handoff_file=$3 alive_file=$4
-  local previous='__unset__' current target='' workspace class title handoff=''
+  local previous='__unset__' current target='' workspace class title handoff='' phase='pre-handoff'
   while [[ -e "$alive_file" ]]; do
     if [[ -s "$target_file" ]]; then
       target=$(cat "$target_file")
@@ -385,6 +485,8 @@ monitor_active_windows() {
     fi
     current=$(active_window_id)
     if [[ "$current" != "$previous" ]]; then
+      phase='pre-handoff'
+      [[ -s "$handoff_file" ]] && phase='post-handoff'
       workspace=''
       class=''
       title=''
@@ -393,7 +495,7 @@ monitor_active_windows() {
         class=$(window_class "$current" 2>/dev/null || true)
         title=$(window_title "$current" 2>/dev/null || true)
       fi
-      printf '%s\t%s\t%s\t%s\t%s\n' "$(now_ms)" "$current" "$workspace" "$class" "$title" >>"$transitions"
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(now_ms)" "$current" "$workspace" "$class" "$title" "$phase" >>"$transitions"
       previous=$current
     fi
     sleep 0.02
@@ -466,7 +568,7 @@ for ((run=1; run<=runs; run+=1)); do
       grep -qx "$id" "$before_clients" && continue
       class=$(window_class "$id" 2>/dev/null || true)
       title=$(window_title "$id" 2>/dev/null || true)
-      if [[ "$class" == *'"mutation_preview_native_smoke"'* ]] && [[ "$title" == "$EXPECTED_TITLE" ]]; then
+      if wm_class_matches_expected "$class" && [[ "$title" == "$EXPECTED_TITLE" ]]; then
         new_matching+=("$id")
       fi
     done < <(client_window_ids)
@@ -522,7 +624,7 @@ for ((run=1; run<=runs; run+=1)); do
   target_title=$(window_title "$target_window")
   [[ "$target_workspace" == "$controlled_workspace" ]] \
     || write_environment_blocker "run $run new Tauri window landed on workspace '$target_workspace', expected '$controlled_workspace'"
-  [[ "$target_class" == *'"mutation_preview_native_smoke"'* ]] \
+  wm_class_matches_expected "$target_class" \
     || write_environment_blocker "run $run new Tauri window WM_CLASS mismatch: $target_class"
   [[ "$target_title" == "$EXPECTED_TITLE" ]] \
     || write_environment_blocker "run $run new Tauri window title mismatch: $target_title"
@@ -590,12 +692,12 @@ for ((run=1; run<=runs; run+=1)); do
   apply_disabled=$(field_value "$result_copy" apply_disabled)
   frame_renderer=$(field_value "$result_copy" frame_renderer)
 
-  unrelated_after_handoff=$(awk -F '\t' -v handoff="$handoff_ms" -v target="$target_window" '
-    $1 > handoff && $2 != target && $2 != "0x0" {print; count += 1}
+  unrelated_after_handoff=$(awk -F '\t' -v target="$target_window" '
+    $6 == "post-handoff" && $2 != target && $2 != "0x0" {print; count += 1}
     END {if (count == 0) exit 0; else exit 1}
   ' "$transitions" 2>/dev/null || true)
-  unrelated_transition_count=$(awk -F '\t' -v handoff="$handoff_ms" -v target="$target_window" '
-    $1 > handoff && $2 != target && $2 != "0x0" {count += 1} END {print count + 0}
+  unrelated_transition_count=$(awk -F '\t' -v target="$target_window" '
+    $6 == "post-handoff" && $2 != target && $2 != "0x0" {count += 1} END {print count + 0}
   ' "$transitions")
   transitions_json=$(jq -Rn '
     [inputs
@@ -605,7 +707,8 @@ for ((run=1; run<=runs; run+=1)); do
           activeWindow: .[1],
           workspace: .[2],
           wmClass: .[3],
-          title: .[4]
+          title: .[4],
+          phase: .[5]
         }]
   ' <"$transitions")
 
