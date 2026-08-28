@@ -26,9 +26,9 @@ Implement a coherent app integration around the existing generic `planLod`/layou
 
 Add deterministic synthetic 1k, 10k, and 100k histories and report wall-clock planner/layout/search timings plus retained render identity counts. Tests must cover promotion, stable aggregate identities, filter correctness, search determinism, refresh invalidation, and memory/accounting bounds. Keep benchmark assertions broad enough for CI stability; record exact local numbers separately.
 
-## Scope and collaboration
+## Owned initial scope and collaboration
 
-After inspecting current claims, claim only new app-local `scale/search/filter` paths and narrowly necessary viewport/state paths that do not overlap another active worker. Do not edit Rust backend, contracts, graph-elements internals, root docs, or CHANGELOG without coordination. If a generic graph-elements API extension is truly required, post an exact proposal to `.wsbridge:gitinspect` before touching it.
+Own only `apps/gitinspect/src/scale/**`, `apps/gitinspect/src/search/**`, and focused tests/benchmarks under those directories. **Do not edit `App.tsx`, `GraphViewport.tsx`, app state/service files, graph-elements core, Rust backend, contracts, root docs, or CHANGELOG.** Produce a small integration adapter/API and post the exact App/viewport wiring request to `.wsbridge:gitinspect`; the architect will integrate shared surfaces after parallel workers land. If a generic graph-elements API extension is truly required, post an exact proposal before touching it.
 
 Commit meaningful scoped slices locally. Post the commit(s), checks, benchmark evidence, and proposed `## Unreleased` bullet to `.wsbridge:gitinspect`.
 

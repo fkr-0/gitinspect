@@ -22,6 +22,10 @@ commands:
     run: [pnpm, check]
     category: test
     timeoutMs: 300000
+  release-verify:
+    run: [pnpm, release:verify]
+    category: test
+    timeoutMs: 600000
 agent:
   notes: >-
     Preserve unrelated changes, never write to bare /tmp, coordinate concurrent writes with

@@ -6,10 +6,16 @@
     "build": "pnpm -r --if-present build",
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
-    "lint": "pnpm -r --if-present lint",
-    "check": "pnpm typecheck && pnpm test && pnpm build"
+    "lint": "biome lint .",
+    "format": "biome format .",
+    "format:fix": "biome format --write .",
+    "lint:fix": "biome lint --write .",
+    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "release:verify": "bash scripts/release-check.sh --verify",
+    "release:candidate": "bash scripts/release-check.sh --candidate"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.10",
     "typescript": "7.0.2",
     "vitest": "4.1.11"
   }
