@@ -337,6 +337,38 @@ Phase-42 durable evidence on the committed gate bytes:
 
 Original apply remains **NO-GO/unavailable**. No original-repository mutation command, capability, UI enablement, authorization widening, safety-case reopening, publish, deploy, tag, or release action was introduced.
 
+## Phase-43 adversarial native gate qualification
+
+Phase 43 qualifies the release/operator gate itself rather than adding projection, LOD, mutation, or authorization features. Adversarial review found three concrete release-tooling defects and repairs them at commit `23505c1cb7220932043c3720e2c246e363078859` (`test(release): adversarially harden native gate`), with final gate SHA256 `d3c8104134a66cb26886b60bd2feda57418f09de7b4201a5901b596f9ed41d4d`:
+
+- competing-runner classification is now token/basename-bound rather than substring-bound, including exact `cargo --bin NAME` and `cargo --bin=NAME` forms and rejecting lookalike browser script names;
+- native client discovery now requires the exact observed WM_CLASS pair `"mutation_preview_native_smoke", "Mutation_preview_native_smoke"` rather than accepting a substring match;
+- active-window transitions are tagged `pre-handoff` or `post-handoff` at observation time, removing the old millisecond-timestamp `>` comparison that could miss a later unrelated transition in the same millisecond as the handoff.
+
+A pure repository-owned `release:native-gate-test` exercises positive and negative executable/argv classification, exact/non-exact WM_CLASS matching, and handoff transition classification without touching the desktop. Bash syntax, ShellCheck, the self-test, and Git whitespace checks are green on the repaired gate bytes.
+
+Representative preflight blockers were exercised only with gate-owned disposable processes or existing read-only desktop state. For an occupied requested workspace, a dummy direct native runner, a dummy cargo native-smoke launcher using the previously missed `--bin=` spelling, and a dummy browser-headed runner, the gate exits **2** with `BLOCKED_ENVIRONMENT`. In every case a signature over focused workspace, `_NET_ACTIVE_WINDOW`, `_NET_CLIENT_LIST`, and workspace metadata is unchanged before/after. No unrelated operator process or window is launched, moved, focused, closed, or killed to manufacture those blockers.
+
+The one-handoff invariant was challenged separately on otherwise-absent workspace **29**. After the exact GraphScene/WebGL readiness-gated handoff, a disposable Phase-43 xterm was created and activated once. The monitor records that exact xterm as a `post-handoff` unrelated non-zero active-window transition, then records Tauri returning active after the owned xterm exits. Native run 1 fails strictly with exit 101, focus/blur instability, and `unrelated_active_window_transitions_after_handoff=1`; runs 2 and 3 are green, so the gate correctly returns overall **FAIL** at **2/3** rather than masking the challenged run. Cleanup restores workspace 3 and the original active window, workspace 29 disappears, and owned process/window residue is zero.
+
+Because the gate bytes changed, Phase 43 reran the complete current-byte native authority from committed HEAD `23505c1cb7220932043c3720e2c246e363078859`. The serialized series is **3/3 green** on otherwise-unused workspace 9. Every run has zero competing headed runners, exactly one readiness-gated external handoff, `frame_renderer=Apple GPU`, 120 real requestAnimationFrame samples, visible/focused provenance throughout, zero visibility/focus/blur events, the exact selected authoritative transformed ID `commit:ffffffffffffffffffffffffffffffff00000003`, live/pressed/exact-one-roving true, an empty blocker set, and zero unrelated non-zero post-handoff active-window transitions. Per-run raw/native-result/active-window-transition hashes are retained in the machine-readable summary. Cleanup again removes workspace 9 and restores the original desktop focus without residual headed runners.
+
+Focused transformed-topology/preview continuity remains **34/34** green. Full release verification on the repaired committed gate is green across graph-elements **48/48**, app **149/149**, workspace TypeScript/lint/build, gitinspect-core fmt/clippy/tests, Tauri fmt/clippy/tests/check, 1k/10k/100k CPU/planner/search instrumentation, startup-entry budget, and Git whitespace checks. Startup entry JS remains **360.48 kB minified / 107.37 kB gzip**, below the <1 MB gate; deferred `GraphScene` remains **1,037.23 kB / 281.54 kB gzip**. CPU/planner/search measurements remain separate from native GPU/requestAnimationFrame evidence.
+
+The platform boundary remains intentionally scoped. `release:verify` and the ordinary release checklist stay general; `release:native-qualify` is the authoritative **Linux i3/X11 native GPU/projection lane** only and is not introduced as an unconditional macOS/Windows packaging prerequisite. No package candidate was enabled or cut. Browser hardware-WebGL remains supplemental: its production contract still requires `nativeFpsClaim=false`, and the native gate records `browserSupplementalOnly=true` / `browserNativeFpsClaim=false`.
+
+AT-SPI was reprobed read-only. `org.a11y.Bus.GetAddress` returns the private bus path, but `org.a11y.Status` is not activatable and direct registry connection is refused. The separate accessibility result therefore remains `BLOCKED_ENVIRONMENT`; `native_accessibility_tree_claim=false` and `screen_reader_claim=false` remain explicit.
+
+Phase-43 evidence on the repaired gate bytes:
+
+- `.ws-bridge/evidence/gitinspect-phase43-adversarial.txt` — adversarial blocker and one-handoff challenge evidence;
+- `.ws-bridge/evidence/gitinspect-phase43-native-qualification.txt` — SHA256 `8be23735ffd450b591dd4d92aea1f1f87786e393afef59b1968350114199081a`;
+- `.ws-bridge/evidence/gitinspect-phase43-native-qualification.json` — SHA256 `23a5443d5e3c8b23d1084cf21293eb39d6f385e6e74411249f161b5f6b59baac`;
+- `.ws-bridge/evidence/gitinspect-phase43-interaction.txt` — SHA256 `2dc0750f09c63eb0bd409c9d012397d47ad80adf29cd34196775dcf03165d95a`;
+- `.ws-bridge/evidence/gitinspect-phase43-at-spi.txt` — SHA256 `847840e3f11db716e9295acee60ab824ee35c839e4be6a6fe92b76a4f6d6d9b9`.
+
+Original apply remains **NO-GO/unavailable**. No original-repository mutation path, command, capability, UI enablement, authorization widening, Phase-28–31 safety-case reopening, package enablement, publish, deploy, tag, or release action was introduced.
+
 ## Next bounded tranche
 
-Phase 43 should remain preview-only and treat `pnpm release:native-qualify` as the native release authority rather than recreating desktop shell history. Focus on adversarial qualification of the gate itself: prove its environment blockers against representative competing native/browser runners and workspace occupancy, tighten event provenance only if a concrete missed-transition case is demonstrated, and integrate the gate into any future candidate orchestration without making i3/X11 a false cross-platform packaging requirement. Preserve browser `nativeFpsClaim=false`, the AT-SPI read-only boundary, unchanged projection/selection truth, and original apply **NO-GO**.
+Phase 44 should remain release-tooling-only and preview-only. Independently replay the Phase-43 gate self-test and committed evidence contract, qualify fail-closed interruption/cleanup of only gate-owned processes if it can be done without disturbing unrelated desktop state, and verify the native i3/X11 applicability boundary remains opt-in to that qualified environment rather than leaking into generic macOS/Windows release verification. Do not change production projection/LOD/selection truth unless a new visible/focused native defect is proven; keep browser hardware-WebGL supplemental with `nativeFpsClaim=false`, AT-SPI read-only and separately claimed, and original apply **NO-GO**.
