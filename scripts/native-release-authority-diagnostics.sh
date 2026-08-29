@@ -100,17 +100,19 @@ if [[ "$actual_gate_sha" != "$expected_gate_sha" ]]; then
   exit 1
 fi
 
+[[ -f "$authority_summary" ]] || { echo "native summary missing: $authority_summary" >&2; exit 2; }
+actual_summary_sha=$(sha256sum "$authority_summary" | awk '{print $1}')
+if [[ "$actual_summary_sha" != "$authority_summary_sha" ]]; then
+  printf 'authority_reject=canonical-summary-byte-mismatch expected=%s actual=%s\n' \
+    "$authority_summary_sha" "$actual_summary_sha" >&2
+  exit 1
+fi
+
 if [[ -n "$summary_override" ]]; then
   summary_path=$summary_override
   [[ "$summary_path" == /* ]] || summary_path="$repo_root/$summary_path"
 else
   summary_path=$authority_summary
-  [[ -f "$summary_path" ]] || { echo "native summary missing: $summary_path" >&2; exit 2; }
-  actual_summary_sha=$(sha256sum "$summary_path" | awk '{print $1}')
-  if [[ "$actual_summary_sha" != "$authority_summary_sha" ]]; then
-    printf 'authority_reject=canonical-summary-byte-mismatch expected=%s actual=%s\n' "$authority_summary_sha" "$actual_summary_sha" >&2
-    exit 1
-  fi
 fi
 
 validate_summary() {
@@ -312,6 +314,35 @@ run_self_test() {
   jq '.sourceEvidence.nativeRustSha256 = "2222222222222222222222222222222222222222222222222222222222222222"' \
     "$summary_path" >"$runtime_dir/tampered-native-rust.json"
   expect_reject tampered-native-rust-source "$runtime_dir/tampered-native-rust.json"
+
+  # Override validation is rooted in the manifest-pinned canonical bytes. A
+  # caller cannot replace both the semantic baseline and candidate with the
+  # same tampered copy while retaining the original manifest hash.
+  local tampered_canonical="$runtime_dir/tampered-canonical.json"
+  local tampered_candidate="$runtime_dir/tampered-candidate.json"
+  local tampered_authority="$runtime_dir/tampered-authority.json"
+  jq '.contract.readinessMarker = "jointly tampered readiness"' "$summary_path" >"$tampered_canonical"
+  cp "$tampered_canonical" "$tampered_candidate"
+  jq --arg summary "$tampered_canonical" --arg sha "$authority_summary_sha" \
+    '.summaryPath = $summary | .summarySha256 = $sha' "$authority_path" >"$tampered_authority"
+  local canonical_first canonical_second canonical_first_exit canonical_second_exit
+  set +e
+  canonical_first=$(bash "$repo_root/scripts/native-release-authority-diagnostics.sh" \
+    --authority "$tampered_authority" --summary "$tampered_candidate" 2>&1)
+  canonical_first_exit=$?
+  canonical_second=$(bash "$repo_root/scripts/native-release-authority-diagnostics.sh" \
+    --authority "$tampered_authority" --summary "$tampered_candidate" 2>&1)
+  canonical_second_exit=$?
+  set -e
+  if [[ "$canonical_first_exit" != '1' || "$canonical_second_exit" != '1' \
+    || "$canonical_first" != "$canonical_second" \
+    || "$canonical_first" != authority_reject=canonical-summary-byte-mismatch* ]]; then
+    printf 'self_test_failure=tampered-canonical-override first_exit=%s second_exit=%s output=%s\n' \
+      "$canonical_first_exit" "$canonical_second_exit" "$canonical_first" >&2
+    failures=$((failures + 1))
+  else
+    echo 'authority_rejection=PASS case=tampered-canonical-override deterministic=true exit=1'
+  fi
 
   local fixture_dir="$runtime_dir/evidence"
   local fixture_summary="$runtime_dir/fixture-summary.json"
