@@ -2,7 +2,6 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { Worker, isMainThread, parentPort, workerData } from "node:worker_threads";
@@ -273,13 +272,7 @@ function publishPreparedAuthority({
       }
       fsyncDirectory(directory);
     } finally {
-      if (tempExists) {
-        try {
-          fs.unlinkSync(temp);
-        } catch (error) {
-          if (error.code !== "ENOENT") throw error;
-        }
-      }
+      if (tempExists) fs.rmSync(temp, { force: true });
     }
 
     const published = readCanonicalAuthority(fixtureRoot, canonicalManifest);
@@ -559,11 +552,7 @@ async function main() {
     console.log(PASS);
   } finally {
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
-    try {
-      if (fs.readdirSync(runtimeRoot).length === 0) fs.rmdirSync(runtimeRoot);
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-    }
+    if (fs.existsSync(runtimeRoot) && fs.readdirSync(runtimeRoot).length === 0) fs.rmdirSync(runtimeRoot);
   }
 }
 
