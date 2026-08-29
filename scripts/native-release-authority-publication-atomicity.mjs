@@ -71,6 +71,13 @@ function fixtureFile(fixtureRoot, relative) {
   assert(stat.isFile() && !stat.isSymbolicLink(), "PATH_SUBSTITUTION", `path is not a regular file: ${relative}`);
   const realResolved = fs.realpathSync(resolved);
   assert(realResolved === resolved && realResolved.startsWith(prefix), "PATH_SUBSTITUTION", `path traversed symlink: ${relative}`);
+  assert((stat.mode & 0o222) === 0, "PAYLOAD_NOT_SEALED", `payload remains writable: ${relative}`);
+
+  const generationDir = path.dirname(resolved);
+  const generationStat = fs.lstatSync(generationDir);
+  assert(generationStat.isDirectory() && !generationStat.isSymbolicLink(), "PATH_SUBSTITUTION", `generation path is not a directory: ${relative}`);
+  assert(fs.realpathSync(generationDir) === generationDir, "PATH_SUBSTITUTION", `generation traversed symlink: ${relative}`);
+  assert((generationStat.mode & 0o222) === 0, "PAYLOAD_NOT_SEALED", `generation directory remains writable: ${relative}`);
   return resolved;
 }
 
@@ -145,6 +152,25 @@ function durableWriteNew(file, bytes) {
   }
 }
 
+function makeWritableForCleanup(root) {
+  if (!fs.existsSync(root)) return;
+  const stat = fs.lstatSync(root);
+  if (stat.isSymbolicLink()) return;
+  if (stat.isDirectory()) {
+    fs.chmodSync(root, 0o700);
+    for (const entry of fs.readdirSync(root)) makeWritableForCleanup(path.join(root, entry));
+  } else {
+    fs.chmodSync(root, 0o600);
+  }
+}
+
+function sealGeneration(fixtureRoot, generation) {
+  const generationDir = path.join(fixtureRoot, "generations", generation);
+  for (const name of Object.values(PAYLOAD_NAMES)) fs.chmodSync(path.join(generationDir, name), 0o444);
+  fs.chmodSync(generationDir, 0o555);
+  fsyncDirectory(generationDir);
+}
+
 function buildGeneration(fixtureRoot, generation, nativeHead) {
   const generationDir = path.join(fixtureRoot, "generations", generation);
   fs.mkdirSync(generationDir, { recursive: true, mode: 0o700 });
@@ -197,7 +223,7 @@ function buildGeneration(fixtureRoot, generation, nativeHead) {
   durableWriteNew(path.join(fixtureRoot, candidatePath), candidateBytes);
   const candidateSha256 = sha256Bytes(candidateBytes);
 
-  fsyncDirectory(generationDir);
+  sealGeneration(fixtureRoot, generation);
   fsyncDirectory(path.dirname(generationDir));
 
   const manifest = {
@@ -232,7 +258,7 @@ function publishPreparedAuthority({
   expectedGateSha256,
   proposedManifestBytes,
   beforeRename = undefined,
-  rename = fs.renameSync,
+  injectRenameFailure = false,
 }) {
   const directory = path.dirname(canonicalManifest);
   const publicationLock = `${canonicalManifest}.publication-lock`;
@@ -273,7 +299,12 @@ function publishPreparedAuthority({
       assert(preRenameBytes.equals(expectedManifestBytes), "CONCURRENT_AUTHORITY_CHANGE");
 
       try {
-        rename(temp, canonicalManifest);
+        if (injectRenameFailure) {
+          const error = new Error("injected rename failure");
+          error.code = "EIO";
+          throw error;
+        }
+        fs.renameSync(temp, canonicalManifest);
         tempExists = false;
       } catch (error) {
         throw new PublicationError("RENAME_FAILED", `RENAME_FAILED: ${error.code ?? error.message}`);
@@ -490,7 +521,11 @@ async function main() {
     }
 
     const substitutedSummary = path.join(fixtureRoot, "generations", "new", "summary-copy.json");
+    const newGenerationDir = path.dirname(substitutedSummary);
+    fs.chmodSync(newGenerationDir, 0o755);
     fs.copyFileSync(path.join(fixtureRoot, newGeneration.manifest.summaryPath), substitutedSummary, fs.constants.COPYFILE_EXCL);
+    fs.chmodSync(substitutedSummary, 0o444);
+    fs.chmodSync(newGenerationDir, 0o555);
     const substitutedManifest = {
       ...newGeneration.manifest,
       summaryPath: "generations/new/summary-copy.json",
@@ -509,7 +544,9 @@ async function main() {
     const symlinkGeneration = buildGeneration(fixtureRoot, "symlinked", "4".repeat(40));
     const symlinkGenerationDir = path.join(fixtureRoot, "generations", "symlinked");
     const escapedGenerationDir = path.join(runtimeRoot, `phase49-escaped-generation-${crypto.randomUUID()}`);
+    fs.chmodSync(symlinkGenerationDir, 0o755);
     fs.renameSync(symlinkGenerationDir, escapedGenerationDir);
+    fs.chmodSync(escapedGenerationDir, 0o555);
     fs.symlinkSync(escapedGenerationDir, symlinkGenerationDir, "dir");
     try {
       expectPublicationError("PATH_SUBSTITUTION", () =>
@@ -524,6 +561,7 @@ async function main() {
       );
     } finally {
       fs.unlinkSync(symlinkGenerationDir);
+      makeWritableForCleanup(escapedGenerationDir);
       fs.rmSync(escapedGenerationDir, { recursive: true, force: true });
     }
 
@@ -541,18 +579,14 @@ async function main() {
         expectedSummarySha256: baseline.manifest.summarySha256,
         expectedGateSha256: baseline.manifest.gateSha256,
         proposedManifestBytes: newGeneration.manifestBytes,
-        rename: () => {
-          const error = new Error("injected rename failure");
-          error.code = "EIO";
-          throw error;
-        },
+        injectRenameFailure: true,
       }),
     );
     assert(readCanonicalAuthority(fixtureRoot, canonicalManifest).manifest.generation === "old", "SELF_TEST_FAILURE", "rename failure changed canonical state");
 
     const proposedSummaryFile = path.join(fixtureRoot, newGeneration.manifest.summaryPath);
     const proposedSummaryBytes = fs.readFileSync(proposedSummaryFile);
-    expectPublicationError("PAYLOAD_HASH_MISMATCH", () =>
+    expectPublicationError("PAYLOAD_NOT_SEALED", () =>
       publishPreparedAuthority({
         fixtureRoot,
         canonicalManifest,
@@ -560,15 +594,43 @@ async function main() {
         expectedSummarySha256: baseline.manifest.summarySha256,
         expectedGateSha256: baseline.manifest.gateSha256,
         proposedManifestBytes: newGeneration.manifestBytes,
-        beforeRename: () => fs.writeFileSync(proposedSummaryFile, Buffer.concat([proposedSummaryBytes, Buffer.from("mutated-after-validation\n")])),
+        beforeRename: () => {
+          fs.chmodSync(proposedSummaryFile, 0o600);
+          fs.writeFileSync(proposedSummaryFile, Buffer.concat([proposedSummaryBytes, Buffer.from("mutated-after-validation\n")]));
+        },
       }),
     );
     assert(
       readCanonicalAuthority(fixtureRoot, canonicalManifest).manifest.generation === "old",
       "SELF_TEST_FAILURE",
-      "mutated prepared payload acquired canonical authority",
+      "unsealed prepared payload acquired canonical authority",
     );
     fs.writeFileSync(proposedSummaryFile, proposedSummaryBytes);
+    fs.chmodSync(proposedSummaryFile, 0o444);
+
+    let lateRenameCallbackCalled = false;
+    expectPublicationError("RENAME_FAILED", () =>
+      publishPreparedAuthority({
+        fixtureRoot,
+        canonicalManifest,
+        expectedManifestBytes: baseline.manifestBytes,
+        expectedSummarySha256: baseline.manifest.summarySha256,
+        expectedGateSha256: baseline.manifest.gateSha256,
+        proposedManifestBytes: newGeneration.manifestBytes,
+        injectRenameFailure: true,
+        rename: () => {
+          lateRenameCallbackCalled = true;
+          fs.appendFileSync(proposedSummaryFile, "late-rename-mutation\n");
+        },
+      }),
+    );
+    assert(!lateRenameCallbackCalled, "SELF_TEST_FAILURE", "arbitrary rename callback surface remains active");
+    assert(sha256File(proposedSummaryFile) === newGeneration.manifest.summarySha256, "SELF_TEST_FAILURE", "sealed payload changed at rename boundary");
+    assert(
+      readCanonicalAuthority(fixtureRoot, canonicalManifest).manifest.generation === "old",
+      "SELF_TEST_FAILURE",
+      "late rename mutation acquired canonical authority",
+    );
 
     expectPublicationError("CONCURRENT_AUTHORITY_CHANGE", () =>
       publishPreparedAuthority({
@@ -588,7 +650,7 @@ async function main() {
 
     console.log("authority_publication_fixture=PASS repository_local=true immutable_generation_payloads=true canonical_manifest_single_rename=true simulated_only=true");
     console.log(
-      "publication_failure_matrix=PASS stale_expected_manifest_bytes=true stale_expected_summary_hash=true stale_expected_gate_hash=true stale_proposed_summary_hash=true stale_proposed_gate_hash=true path_substitution=true parent_symlink_escape=true prepared_payload_mutation_precommit=true interrupted_temp_ignored=true rename_failure_fail_closed=true concurrent_publisher_blocked=true concurrent_authority_change_fail_closed=true",
+      "publication_failure_matrix=PASS stale_expected_manifest_bytes=true stale_expected_summary_hash=true stale_expected_gate_hash=true stale_proposed_summary_hash=true stale_proposed_gate_hash=true path_substitution=true parent_symlink_escape=true generation_payload_sealed=true prepared_payload_mutation_precommit=true late_rename_callback_surface=false interrupted_temp_ignored=true rename_failure_fail_closed=true concurrent_publisher_blocked=true concurrent_authority_change_fail_closed=true",
     );
     console.log(
       `concurrent_reader_loops=PASS workers=${concurrent.workerCount} iterations_per_worker=${concurrent.iterations} accepted_coherent=${concurrent.accepted} rejected_manifest_changed=${concurrent.changedDuringRead} mixed_authority_accepted=false`,
@@ -600,6 +662,7 @@ async function main() {
     console.log("production_authority_bytes=UNCHANGED manifest=true native_gate=true inherited_phase46_summary=true");
     console.log(PASS);
   } finally {
+    makeWritableForCleanup(fixtureRoot);
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
     if (fs.existsSync(runtimeRoot) && fs.readdirSync(runtimeRoot).length === 0) fs.rmdirSync(runtimeRoot);
   }
