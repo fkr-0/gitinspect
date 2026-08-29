@@ -14,6 +14,7 @@
     "release:verify": "bash scripts/release-check.sh --verify",
     "release:candidate": "bash scripts/release-check.sh --candidate",
     "release:native-gate-test": "bash scripts/native-release-qualification.sh --self-test",
+    "release:native-authority-diagnostics": "bash scripts/native-release-authority-diagnostics.sh --self-test",
     "release:native-qualify": "bash scripts/native-release-qualification.sh"
   },
   "devDependencies": {

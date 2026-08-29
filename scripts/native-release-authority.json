@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "nativeAuthorityPhase": 46,
+  "summaryPath": ".ws-bridge/evidence/gitinspect-phase46-native-qualification.json",
+  "summarySha256": "cca0e9b0f76a8a601581fcea09091175c1c68b363556be91148fdc2d02fc12ee",
+  "nativeHead": "ad83c16b0b941b82ac1d6ba7d8d79366c0de3784",
+  "gatePath": "scripts/native-release-qualification.sh",
+  "gateSha256": "6b519b004b443d5896d685cabb6fefc9d3fdad330aaafa9030a5b32b540f53e8"
+}
