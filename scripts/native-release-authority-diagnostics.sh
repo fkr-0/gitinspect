@@ -117,12 +117,16 @@ validate_summary() {
   local candidate=$1 payload_dir=${2:-}
   [[ -f "$candidate" ]] || { echo "authority_reject=summary-missing path=$candidate" >&2; return 1; }
 
-  if ! jq -e --arg head "$expected_head" --arg gate "$expected_gate_sha" '
+  if ! jq -e --arg head "$expected_head" --arg gate "$expected_gate_sha" --slurpfile canonical "$authority_summary" '
     .schemaVersion == 1
     and .status == "PASS"
     and .head == $head
     and .nativeApplicability.lane == "linux-x11-i3"
     and .nativeApplicability.result == "APPLICABLE"
+    and .contract == $canonical[0].contract
+    and .desktop == $canonical[0].desktop
+    and .sourceEvidence == $canonical[0].sourceEvidence
+    and (.runs | length) == ($canonical[0].runs | length)
     and .contract.minimumSerializedRuns == 3
     and .contract.maxExternalHandoffsPerRun == 1
     and .contract.noContinuousRefocus == true
@@ -135,11 +139,17 @@ validate_summary() {
     and (.runs | type == "array" and length >= 3)
     and ([.runs[].run] == [range(1; (.runs | length) + 1)])
     and all(.runs[];
-      .processes.preflightNativeSmoke == 0
+      . as $run
+      | (($canonical[0].runs[] | select(.run == $run.run) | del(.evidence)) == ($run | del(.evidence)))
+      and .processes.preflightNativeSmoke == 0
       and .processes.preflightOtherHeadedGitinspect == 0
       and .processes.handoffNativeSmoke == 1
       and .processes.handoffOtherHeadedGitinspect == 0
+      and .workspace == $canonical[0].desktop.controlledWorkspace
+      and .window.wmClass == "\"mutation_preview_native_smoke\", \"Mutation_preview_native_smoke\""
+      and .window.title == "gitinspect"
       and .handoff.count == 1
+      and .handoff.activeAfter == .window.id
       and .nativeExit == 0
       and .frame.samples >= 120
       and .frame.visibilityState == "visible"
@@ -155,6 +165,9 @@ validate_summary() {
       and .accessibility.blocker == ""
       and .accessibility.focusStable == true
       and .unrelatedActiveWindowTransitionsAfterHandoff == 0
+      and ([.activeWindowTransitions[]
+        | select(.phase == "post-handoff" and .activeWindow != $run.window.id and .activeWindow != "0x0")]
+        | length) == 0
       and .passed == true
       and (.blockers | type == "array" and length == 0)
       and (.evidence.rawSha256 | test("^[0-9a-f]{64}$"))
@@ -283,6 +296,23 @@ run_self_test() {
     "$summary_path" >"$runtime_dir/stale-gate.json"
   expect_reject stale-gate "$runtime_dir/stale-gate.json"
 
+  jq '.contract.readinessMarker = "tampered readiness"' "$summary_path" >"$runtime_dir/tampered-readiness.json"
+  expect_reject tampered-readiness-marker "$runtime_dir/tampered-readiness.json"
+  jq '.runs[0].window.wmClass = "tampered class"' "$summary_path" >"$runtime_dir/tampered-wm-class.json"
+  expect_reject tampered-wm-class "$runtime_dir/tampered-wm-class.json"
+  jq '.runs[0].window.title = "tampered title"' "$summary_path" >"$runtime_dir/tampered-title.json"
+  expect_reject tampered-window-title "$runtime_dir/tampered-title.json"
+  jq '.runs[0].workspace = "tampered-workspace"' "$summary_path" >"$runtime_dir/tampered-workspace.json"
+  expect_reject tampered-workspace "$runtime_dir/tampered-workspace.json"
+  jq '.runs[0].handoff.activeAfter = "0x999"' "$summary_path" >"$runtime_dir/tampered-handoff.json"
+  expect_reject tampered-handoff-active-after "$runtime_dir/tampered-handoff.json"
+  jq '.runs[0].activeWindowTransitions += [{timestampMs:999999,activeWindow:"0x999",workspace:"9",wmClass:"other",title:"other",phase:"post-handoff"}]' \
+    "$summary_path" >"$runtime_dir/tampered-transition.json"
+  expect_reject tampered-post-handoff-transition "$runtime_dir/tampered-transition.json"
+  jq '.sourceEvidence.nativeRustSha256 = "2222222222222222222222222222222222222222222222222222222222222222"' \
+    "$summary_path" >"$runtime_dir/tampered-native-rust.json"
+  expect_reject tampered-native-rust-source "$runtime_dir/tampered-native-rust.json"
+
   local fixture_dir="$runtime_dir/evidence"
   local fixture_summary="$runtime_dir/fixture-summary.json"
   mkdir -p "$fixture_dir"
@@ -336,12 +366,13 @@ run_self_test() {
   local lock="$runtime_dir/qualification.lock"
   local ready="$runtime_dir/lock-ready"
   local terminating="$runtime_dir/lock-terminating"
-  LOCK_PATH="$lock" READY_PATH="$ready" TERMINATING_PATH="$terminating" bash -c '
+  local release="$runtime_dir/lock-release"
+  LOCK_PATH="$lock" READY_PATH="$ready" TERMINATING_PATH="$terminating" RELEASE_PATH="$release" bash -c '
     set -euo pipefail
     exec 8>"$LOCK_PATH"
     flock -n 8
     printf "%s\n" "$$" >"$READY_PATH"
-    trap '\''printf "term\n" >"$TERMINATING_PATH"; sleep 0.25 8>&-; exit 143'\'' TERM
+    trap '\''printf "term\n" >"$TERMINATING_PATH"; while [[ ! -e "$RELEASE_PATH" ]]; do read -r -t 0.05 _ || true; done; exit 143'\'' TERM
     while :; do read -r -t 0.1 _ || true; done
   ' &
   local holder=$!
@@ -356,6 +387,7 @@ run_self_test() {
     echo 'self_test_failure=qualification-lock released before owner termination' >&2
     failures=$((failures + 1))
   fi
+  : >"$release"
   set +e
   wait "$holder"
   local holder_exit=$?
