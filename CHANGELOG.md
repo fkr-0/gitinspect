@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.2.0] - 2026-08-30
+
 ### Added
 
 - Initial gitinspect product and graph-elements framework specifications.
@@ -29,4 +31,15 @@
 - Release compatibility matrix documenting qualified Linux worktree, git-dir, linked-worktree, bare, HEAD-state, refs/tags/stash/remotes, bounded diff/content, native watch/refresh, and scale behavior while keeping packaged macOS/Windows support explicitly unclaimed.
 - Fail-closed native release/operator qualification for Linux i3/X11: proves an unused controlled workspace, rejects competing headed Gitinspect runners, waits for the exact WebGL-convergence marker, permits one external Tauri handoff, records active-window/focus/selection provenance, and requires at least three unchanged strict native passes.
 - Native release-gate hostile-environment self-tests for reduced-tool applicability and cleanup identity/scope: missing `jq` remains non-zero with explicit applicability, stale PID/start-time snapshots are never signalled, owned process-group cleanup selects exact snapshotted identities without broadening to late same-group descendants, and a repository-local advisory lock prevents overlapping desktop-sensitive qualification invocations from racing the zero-runner preflight.
+
+### Changed
+
+- Product metadata now converges on version 0.2.0 across the Tauri shell, Rust authority crates, and private application package.
+- Tauri bundling is enabled for the local release candidate while the compatibility matrix continues to limit qualified packaged operation to the documented Linux lane.
+- Debug and test Rust profiles for the native shell and core authority disable incremental compilation to prevent multi-gigabyte compiler-cache growth in long-lived development worktrees.
+
+### Compatibility
+
+- Original-repository mutation apply remains fail-closed and unauthorized; the qualified mutation studio remains preview/sandbox authority only.
+- Packaged macOS and Windows operation remains unclaimed by this release.
 

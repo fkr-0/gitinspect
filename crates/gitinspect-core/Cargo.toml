@@ -1,6 +1,6 @@
 [package]
 name = "gitinspect-core"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 publish = false
@@ -16,3 +16,9 @@ thiserror = "2.0"
 
 [lints.rust]
 unsafe_code = "forbid"
+# Keep debug and test builds from accumulating large incremental compiler caches.
+[profile.dev]
+incremental = false
+
+[profile.test]
+incremental = false

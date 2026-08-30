@@ -1,6 +1,6 @@
 [package]
 name = "gitinspect-app"
-version = "0.1.0"
+version = "0.2.0"
 description = "gitinspect desktop shell"
 edition = "2024"
 publish = false
@@ -16,3 +16,9 @@ tauri = { version = "2", features = [] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+# Keep debug and test builds from accumulating large incremental compiler caches.
+[profile.dev]
+incremental = false
+
+[profile.test]
+incremental = false
