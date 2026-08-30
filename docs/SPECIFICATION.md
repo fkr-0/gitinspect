@@ -10,7 +10,7 @@ The framework accepts arbitrary data through a stable graph-shaped dataset. Doma
 
 ### gitinspect
 
-A desktop application that builds a Git semantic graph from a local repository, maps Git semantics to graph-elements visuals, supplies inspection content, and stages/qualifies transaction-safe Git mutations in disposable preview sandboxes. The current 0.1.0 product exposes no original-repository apply command.
+A desktop application that builds a Git semantic graph from a local repository, maps Git semantics to graph-elements visuals, supplies inspection content, and stages/qualifies transaction-safe Git mutations in disposable preview sandboxes. The current 0.2.0 product exposes no original-repository apply command.
 
 ## 2. graph-elements conceptual dimensions
 
@@ -133,7 +133,7 @@ Commit inspection includes hash, author/committer, dates, full message, parents,
 
 Mutations are operations collected into a transaction against an immutable `baseRevision`.
 
-The generic graph-elements transaction model can represent later apply states, but GitInspect 0.1.0 deliberately stops at **copy-only preview/confirmation/cancellation** for repository mutation execution. There is no Tauri command that applies to the original repository.
+The generic graph-elements transaction model can represent later apply states, but GitInspect 0.2.0 deliberately stops at **copy-only preview/confirmation/cancellation** for repository mutation execution. There is no Tauri command that applies to the original repository.
 
 Current GitInspect flow:
 

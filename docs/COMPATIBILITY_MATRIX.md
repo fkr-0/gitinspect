@@ -1,8 +1,8 @@
-# GitInspect 0.1.0 repository compatibility matrix
+# GitInspect 0.2.0 repository compatibility matrix
 
 This document records release-oriented compatibility evidence already exercised by the automated GitInspect core and Tauri suites. It is deliberately narrower than a promise that every Git repository or desktop platform is supported.
 
-Evidence refreshed on 2026-08-27 from repository HEAD `c297e7bbbaafe6c8405faf6b581675104a07357f` plus the inherited current worktree, using Git 2.55.0, Rust 1.94.1, Node 24.18.0 and pnpm 11.3.0 on Linux. `pnpm release:verify` passed the complete TypeScript, Rust-core and Tauri regression matrix described in `docs/RELEASE_CHECKLIST.md`.
+Evidence refreshed on 2026-08-31 from tagged repository HEAD `fe697b8e6059b5c067b6407b584ac79bbfb83c5a` (`v0.2.0`), using Git 2.55.0, Rust 1.94.1, Node 24.18.0 and pnpm 11.3.0 on Linux. `pnpm release:candidate` passed the complete TypeScript, Rust-core and Tauri regression matrix plus converged 0.2.0 candidate metadata.
 
 ## Repository topology and HEAD state
 
@@ -69,6 +69,6 @@ The mutation studio is intentionally separate from read-only repository compatib
 
 ## Platform qualification boundary
 
-Current automated repository compatibility is strongest on Linux. CI also compiles/tests the Rust and TypeScript layers on Ubuntu runners, but this matrix does **not** claim packaged desktop execution on macOS or Windows. Phase 6 still requires platform package production plus smoke tests from the produced artifacts before those platforms can be marked release-qualified.
+Current automated repository compatibility is strongest on Linux. CI also compiles/tests the Rust and TypeScript layers on Ubuntu runners, but this matrix does **not** claim packaged desktop execution on macOS or Windows. Tauri bundling is enabled for the 0.2.0 baseline; each platform still requires a produced-artifact smoke test before packaged execution on that platform can be marked release-qualified.
 
 The experimental browser/WebAssembly edition uses synthetic repository provenance and is not evidence for native repository compatibility.

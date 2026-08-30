@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Release/readiness documentation now matches the tagged 0.2.0 metadata, enabled Tauri bundling, green candidate gate, and the remaining packaged-artifact/platform qualification boundaries.
+
 ## [0.2.0] - 2026-08-30
 
 ### Added

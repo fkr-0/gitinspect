@@ -1,8 +1,8 @@
 # Implementation plan
 
-## Release milestone: 0.1.0
+## Release milestone: 0.2.0
 
-0.1.0 is a runnable Tauri application that opens real local repositories, renders an interactive 3D history with distinct Git object/edge classes, supports inspection/search/LOD, watches repository changes, and provides transaction previews. Applying mutations to an original repository remains disabled unless the safety suite is complete.
+0.2.0 is the current tagged local release baseline. It is a runnable Tauri application that opens real local repositories, renders an interactive Git Railfield with inspection/search/LOD, watches repository changes, and provides bounded copy-only mutation previews. Applying mutations to an original repository remains disabled because the required whole-source concurrency safety envelope has not been demonstrated.
 
 ## Phase 1 — conceptual specification and foundation
 
@@ -94,16 +94,16 @@ Delivered across the current shared product tree and its durable evidence:
 
 ## Phase 6 — release
 
-Status: **in progress.** The visual/product regression body is strong, but packaging and release-candidate metadata are not yet complete.
+Status: **0.2.0 local release baseline complete; broader platform/artifact qualification remains open.**
 
-- end-to-end safety and regression suite: **in progress** — `pnpm release:verify` now provides one repeatable local gate spanning TypeScript, core Rust, Tauri, lint/build/tests and diff-check; CI Tauri parity now includes fmt/clippy/tests/check;
-- Tauri platform packages: **open** — `bundle.active` remains false and no installer/AppImage/bundle artifact is yet a qualified release artifact;
-- docs/tutorial/API reference: **open/partial** — specification/architecture/safety evidence exist, but release-oriented tutorial/reference consolidation remains;
-- diverse repository compatibility matrix: **Linux fixture matrix qualified / cross-platform partial** — `docs/COMPATIBILITY_MATRIX.md` now records worktree, git-dir, linked-worktree, bare, HEAD-state, refs/tags/stash/remotes, diff-bound, watcher, refresh and scale evidence; packaged macOS/Windows execution remains open;
-- performance evidence: **qualified for synthetic CPU/layout/LOD/search gates and browser visual topology**, not a packaged GPU/FPS claim;
-- version/changelog/release checklist: **in progress** — see `docs/RELEASE_CHECKLIST.md`; product/core/Tauri are 0.1.0 while the frontend package and changelog are not yet candidate-cut;
+- end-to-end safety and regression suite: **qualified** — `pnpm release:verify` provides one repeatable display-independent gate spanning TypeScript, core Rust, Tauri, lint/build/tests and diff-check; the 0.2.0 candidate gate also passes with converged metadata;
+- Tauri packaging configuration: **enabled** — `bundle.active=true`; however a produced installer/AppImage/bundle has not yet been qualified as a packaged release artifact;
+- docs/tutorial/API reference: **partial** — specification/architecture/safety evidence are strong and release docs are current, but a concise user tutorial plus public graph-elements/contracts API reference remains useful follow-up work;
+- diverse repository compatibility matrix: **Linux repository/runtime evidence qualified / packaged cross-platform partial** — `docs/COMPATIBILITY_MATRIX.md` records worktree, git-dir, linked-worktree, bare, HEAD-state, refs/tags/stash/remotes, diff-bound, watcher, refresh and scale evidence; packaged macOS/Windows execution remains unclaimed;
+- performance evidence: **qualified for synthetic CPU/layout/LOD/search gates plus native Linux i3/X11 projection evidence**, while browser metrics remain supplemental and no packaged cross-platform GPU/FPS claim is made;
+- version/changelog/release checklist: **qualified for 0.2.0 metadata** — product/core/Tauri/frontend/WASM versions converge on 0.2.0, the changelog has a dated 0.2.0 section, bundling is enabled, and `pnpm release:candidate` passes;
 - browser/WebAssembly/GitHub Pages: separate experimental provenance track; it must not be substituted for desktop/native release qualification;
-- no tag/push/publish/deploy without separate operator authorization.
+- local tag `v0.2.0` exists at the current baseline; no push/publish/deploy or new release action is implied without separate operator authorization.
 
 ## Integration gates
 

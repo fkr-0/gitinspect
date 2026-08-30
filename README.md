@@ -10,7 +10,7 @@ The desktop architecture deliberately separates **rendering** from **repository 
 
 ## Development status
 
-This repository is under active development. The first implementation milestone is a read-only end-to-end world for real repositories; mutation operations remain preview-only until transaction safeguards and integration tests are complete.
+GitInspect 0.2.0 is the current tagged local release baseline. Real repository inspection, live refresh, the Git Railfield visualization, and copy-only mutation previews are qualified by the release gate. Original-repository mutation apply remains deliberately unavailable because the whole-source concurrency safety case is still NO-GO.
 
 ## Workspace
 
@@ -30,9 +30,11 @@ pnpm install
 pnpm typecheck
 pnpm test
 pnpm build
+pnpm release:verify
+pnpm release:candidate
 ```
 
-The Tauri app and Rust workspace add their own focused commands as their tracks land.
+`pnpm release:verify` is the display-independent regression gate across TypeScript, Rust core, Tauri, lint/build/tests, and whitespace checks. `pnpm release:candidate` adds fail-closed version/changelog/bundling metadata checks. Linux i3/X11 native projection qualification is intentionally separate and environment-sensitive; see `docs/RELEASE_CHECKLIST.md` before running `pnpm release:native-qualify`.
 
 ## Safety model
 
