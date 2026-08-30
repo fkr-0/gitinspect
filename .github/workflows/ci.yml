@@ -21,6 +21,9 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm release:metadata
+      - run: pnpm release:metadata-test
+      - run: pnpm lint
       - run: pnpm check
 
   rust-core:

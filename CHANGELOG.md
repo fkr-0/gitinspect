@@ -5,6 +5,7 @@
 ### Changed
 
 - Release/readiness documentation now matches the tagged 0.2.0 metadata, enabled Tauri bundling, green candidate gate, and the remaining packaged-artifact/platform qualification boundaries.
+- CI now enforces the fast release-candidate metadata contract, adversarially tests its fail-closed version/changelog/bundling cases, and runs the root Biome lint gate explicitly.
 
 ## [0.2.0] - 2026-08-30
 

@@ -11,6 +11,8 @@
     "format:fix": "biome format --write .",
     "lint:fix": "biome lint --write .",
     "check": "pnpm typecheck && pnpm test && pnpm build",
+    "release:metadata": "bash scripts/release-check.sh --candidate --metadata-only",
+    "release:metadata-test": "bash scripts/release-metadata-self-test.sh",
     "release:verify": "bash scripts/release-check.sh --verify",
     "release:candidate": "bash scripts/release-check.sh --candidate",
     "release:native-gate-test": "bash scripts/native-release-qualification.sh --self-test",
