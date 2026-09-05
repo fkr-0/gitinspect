@@ -127,6 +127,85 @@ describe("RepositoryLiveRefreshCoordinator", () => {
     expect(onRefreshed).toHaveBeenCalledWith(changed);
   });
 
+  it("does not let stale in-flight watcher metadata force a follow-up refresh", async () => {
+    const current = session("rev-1");
+    const refreshed = session("rev-2");
+    const first = deferred<RepositorySession>();
+    const refreshRepository = vi.fn(() => first.promise);
+    const onRefreshed = vi.fn();
+    const onError = vi.fn();
+    const coordinator = new RepositoryLiveRefreshCoordinator({ refreshRepository }, current, {
+      onRefreshed,
+      onError,
+    });
+
+    coordinator.request(change("rev-1"));
+    expect(coordinator.request(change("stale-revision"))).toBe(true);
+    first.resolve(refreshed);
+    await flushPromises();
+
+    expect(refreshRepository).toHaveBeenCalledTimes(1);
+    expect(onRefreshed).toHaveBeenCalledWith(refreshed);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("reports a refresh that returns a different repository identity", async () => {
+    const current = session("rev-1");
+    const wrongRepository = {
+      ...session("rev-2"),
+      key: "repository:other",
+    };
+    const refreshRepository = vi.fn(async () => wrongRepository);
+    const onRefreshed = vi.fn();
+    const onError = vi.fn();
+    const coordinator = new RepositoryLiveRefreshCoordinator({ refreshRepository }, current, {
+      onRefreshed,
+      onError,
+    });
+
+    coordinator.request(change("rev-1"));
+    await flushPromises();
+
+    expect(onRefreshed).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ message: expect.stringMatching(/identity mismatch/i) }),
+    );
+  });
+
+  it("does not lose a current-revision event raised while publishing a refresh", async () => {
+    const firstSession = session("rev-1");
+    const secondSession = session("rev-2");
+    const thirdSession = session("rev-3");
+    const second = deferred<RepositorySession>();
+    const refreshRepository = vi
+      .fn()
+      .mockResolvedValueOnce(secondSession)
+      .mockImplementationOnce(() => second.promise);
+    let coordinator: RepositoryLiveRefreshCoordinator;
+    const onRefreshed = vi.fn((refreshed: RepositorySession) => {
+      if (refreshed.snapshot.revision === "rev-2") {
+        expect(coordinator.request(change("rev-2"))).toBe(true);
+      }
+    });
+    coordinator = new RepositoryLiveRefreshCoordinator({ refreshRepository }, firstSession, {
+      onRefreshed,
+      onError: vi.fn(),
+    });
+
+    coordinator.request(change("rev-1"));
+    await flushPromises();
+    expect(refreshRepository).toHaveBeenCalledTimes(2);
+    expect(refreshRepository).toHaveBeenNthCalledWith(2, secondSession);
+
+    second.resolve(thirdSession);
+    await flushPromises();
+    expect(onRefreshed.mock.calls.map(([value]) => value.snapshot.revision)).toEqual([
+      "rev-2",
+      "rev-3",
+    ]);
+  });
+
   it("does not publish or start a queued refresh after disposal", async () => {
     const current = session("rev-1");
     const refreshed = session("rev-2");

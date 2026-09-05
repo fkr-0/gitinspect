@@ -20,6 +20,7 @@ export class RepositoryLiveRefreshCoordinator {
   private active = true;
   private refreshing = false;
   private followUpRequested = false;
+  private readonly inFlightPreviousRevisions = new Set<string>();
   private refreshSession: RepositorySession;
 
   constructor(
@@ -34,11 +35,12 @@ export class RepositoryLiveRefreshCoordinator {
     if (!this.active || change.repositoryId !== this.refreshSession.key) return false;
 
     // While a refresh is in flight the native authority may already have moved
-    // to the result revision, so the event's previousRevision can legitimately
-    // be either the request revision or the just-refreshed revision. Retain one
-    // follow-up instead of rejecting it against a transient local revision.
+    // beyond the result revision. Defer revision validation until the refresh
+    // resolves: only an event tied to the request revision (when the refresh is
+    // unchanged/failed) or the returned revision (when it changed) can justify
+    // a follow-up. Arbitrary stale/future revisions must not bypass the guard.
     if (this.refreshing) {
-      this.followUpRequested = true;
+      this.inFlightPreviousRevisions.add(change.previousRevision);
       return true;
     }
 
@@ -51,28 +53,65 @@ export class RepositoryLiveRefreshCoordinator {
   dispose(): void {
     this.active = false;
     this.followUpRequested = false;
+    this.inFlightPreviousRevisions.clear();
   }
 
   private pump(): void {
     if (!this.active || this.refreshing || !this.followUpRequested) return;
     this.followUpRequested = false;
     this.refreshing = true;
+    this.inFlightPreviousRevisions.clear();
     const requestSession = this.refreshSession;
 
-    void this.service
-      .refreshRepository(requestSession)
-      .then((refreshed) => {
-        if (!this.active || refreshed.key !== requestSession.key) return;
-        if (refreshed.snapshot.revision === requestSession.snapshot.revision) return;
-        this.refreshSession = refreshed;
-        this.callbacks.onRefreshed(refreshed);
-      })
-      .catch((error: unknown) => {
-        if (this.active) this.callbacks.onError(error);
-      })
-      .finally(() => {
-        this.refreshing = false;
-        if (this.active && this.followUpRequested) this.pump();
-      });
+    void this.runRefresh(requestSession);
+  }
+
+  private async runRefresh(requestSession: RepositorySession): Promise<void> {
+    let refreshed: RepositorySession;
+    try {
+      refreshed = await this.service.refreshRepository(requestSession);
+    } catch (error: unknown) {
+      if (!this.active) {
+        this.finishRefresh(false);
+        return;
+      }
+      const followUpRequested = this.inFlightPreviousRevisions.has(
+        requestSession.snapshot.revision,
+      );
+      this.finishRefresh(followUpRequested);
+      this.callbacks.onError(error);
+      if (this.active && this.followUpRequested) this.pump();
+      return;
+    }
+
+    if (!this.active) {
+      this.finishRefresh(false);
+      return;
+    }
+    if (refreshed.key !== requestSession.key) {
+      this.finishRefresh(false);
+      this.callbacks.onError(
+        new Error(`Repository refresh identity mismatch: ${refreshed.key} != ${requestSession.key}`),
+      );
+      return;
+    }
+
+    const requestRevision = requestSession.snapshot.revision;
+    const refreshedRevision = refreshed.snapshot.revision;
+    const changed = refreshedRevision !== requestRevision;
+    const followUpRequested = this.inFlightPreviousRevisions.has(
+      changed ? refreshedRevision : requestRevision,
+    );
+    if (changed) this.refreshSession = refreshed;
+    this.finishRefresh(followUpRequested);
+
+    if (changed) this.callbacks.onRefreshed(refreshed);
+    if (this.active && this.followUpRequested) this.pump();
+  }
+
+  private finishRefresh(followUpRequested: boolean): void {
+    this.inFlightPreviousRevisions.clear();
+    this.refreshing = false;
+    this.followUpRequested = this.active && followUpRequested;
   }
 }
