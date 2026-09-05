@@ -32,6 +32,22 @@ describe("selection URL state", () => {
     expect(selectionFromHref("not a url")).toBeUndefined();
   });
 
+  it("bounds and normalizes root selection ids before URL persistence", () => {
+    const root = "https://gitinspect.local/studio?mode=cursor#world";
+    const normalized = hrefWithSelection(root, "  commit:abc  ");
+    expect(selectionFromHref(normalized)).toBe("commit:abc");
+    expect(new URL(normalized).searchParams.get("mode")).toBe("cursor");
+    expect(new URL(normalized).hash).toBe("#world");
+
+    const oversized = "x".repeat(4_097);
+    const serialized = hrefWithSelection(
+      "https://gitinspect.local/studio?selection=commit%3Aexisting&mode=camera",
+      oversized,
+    );
+    expect(new URL(serialized).searchParams.has("selection")).toBe(false);
+    expect(selectionFromHref(`https://gitinspect.local/studio?selection=${oversized}`)).toBeUndefined();
+  });
+
   it("round-trips bounded commit/file child worlds while preserving root selection and unrelated state", () => {
     const root = hrefWithSelection(
       "https://gitinspect.local/studio?mode=cursor#world",

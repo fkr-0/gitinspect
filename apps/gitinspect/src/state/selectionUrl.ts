@@ -1,4 +1,5 @@
 const SELECTION_PARAM = "selection";
+const MAX_SELECTION_URL_ID_LENGTH = 4_096;
 const CHILD_WORLD_PARAM = "world";
 const CHILD_TARGET_PARAM = "worldTarget";
 const CHILD_SELECTION_PARAM = "worldSelection";
@@ -50,7 +51,7 @@ export function childNavigationHistoryDepth(state: unknown): 1 | 2 | undefined {
 export function selectionFromHref(href: string): string | undefined {
   try {
     const value = new URL(href).searchParams.get(SELECTION_PARAM)?.trim();
-    return value ? value : undefined;
+    return value && value.length <= MAX_SELECTION_URL_ID_LENGTH ? value : undefined;
   } catch {
     return undefined;
   }
@@ -58,8 +59,12 @@ export function selectionFromHref(href: string): string | undefined {
 
 export function hrefWithSelection(href: string, elementId: string | undefined): string {
   const url = new URL(href);
-  if (elementId) url.searchParams.set(SELECTION_PARAM, elementId);
-  else url.searchParams.delete(SELECTION_PARAM);
+  const normalizedElementId = elementId?.trim();
+  if (normalizedElementId && normalizedElementId.length <= MAX_SELECTION_URL_ID_LENGTH) {
+    url.searchParams.set(SELECTION_PARAM, normalizedElementId);
+  } else {
+    url.searchParams.delete(SELECTION_PARAM);
+  }
   return url.toString();
 }
 
