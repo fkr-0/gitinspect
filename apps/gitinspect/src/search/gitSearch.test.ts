@@ -120,6 +120,36 @@ describe("GitSearchIndex", () => {
     expect(first.stats.fuzzyTruncated).toBe(false);
   });
 
+  it("enforces the fuzzy document budget without scanning one extra candidate", () => {
+    const dataset: GraphDataset = {
+      revision: "fuzzy-budget",
+      nodes: Array.from({ length: 96 }, (_, index) =>
+        node(
+          `commit:${index.toString().padStart(3, "0")}`,
+          "commit",
+          {
+            oid: index.toString(16),
+            message: `Synthetic history record ${index}`,
+            authorName: "Scale Fixture",
+          },
+          `Synthetic history record ${index}`,
+        ),
+      ),
+      edges: [],
+    };
+    const outcome = new GitSearchIndex().search(dataset, {
+      text: "definitely-missing",
+      mode: "fuzzy",
+      fuzzyMaxDistance: 1,
+      fuzzyDocumentBudget: 64,
+      fuzzyTokenBudget: 65_536,
+    });
+
+    expect(outcome.results).toEqual([]);
+    expect(outcome.stats.documentsScanned).toBe(64);
+    expect(outcome.stats.fuzzyTruncated).toBe(true);
+  });
+
   it("supports object, author, date, ref, signature, loaded-path, and merge filters", () => {
     const dataset = fixture();
     const index = new GitSearchIndex();

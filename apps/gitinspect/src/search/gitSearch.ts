@@ -507,6 +507,10 @@ export class GitSearchIndex {
     for (const id of this.orderedIds) {
       const document = this.cache.get(id)?.document;
       if (!document || !matchesFilters(document, compiledFilters)) continue;
+      if (needle.length > 0 && mode === "fuzzy" && documentsScanned >= fuzzyDocumentBudget) {
+        fuzzyTruncated = true;
+        break;
+      }
       documentsScanned += 1;
 
       if (needle.length === 0) {
@@ -528,10 +532,6 @@ export class GitSearchIndex {
         continue;
       }
 
-      if (documentsScanned > fuzzyDocumentBudget) {
-        fuzzyTruncated = true;
-        break;
-      }
       let bestDistance: number | undefined;
       for (const token of fuzzyTokensFor(document)) {
         if (fuzzyTokensCompared >= fuzzyTokenBudget) {

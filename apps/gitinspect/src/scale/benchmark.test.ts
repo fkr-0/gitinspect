@@ -52,7 +52,7 @@ describe("Phase-5 scale benchmark instrumentation", () => {
       }
       if (commitCount === 100_000) {
         expect(result.fuzzyProbe).toBeDefined();
-        expect(result.fuzzyProbe!.documentsScanned).toBeLessThanOrEqual(4_097);
+        expect(result.fuzzyProbe!.documentsScanned).toBeLessThanOrEqual(4_096);
         expect(result.fuzzyProbe!.tokensCompared).toBeLessThanOrEqual(16_384);
         expect(result.fuzzyProbe!.elapsedMs).toBeLessThan(5_000);
       }
