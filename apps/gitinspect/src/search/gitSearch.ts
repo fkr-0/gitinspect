@@ -61,6 +61,9 @@ export interface GitSearchIndexUpdateStats {
 
 export interface GitSearchStats extends GitSearchIndexUpdateStats {
   readonly documentsScanned: number;
+  readonly matchedDocuments: number;
+  /** Peak number of result candidates retained while scanning; bounded by the effective limit. */
+  readonly peakRetainedResults: number;
   readonly fuzzyTokensCompared: number;
   readonly fuzzyTruncated: boolean;
 }
@@ -383,6 +386,46 @@ function clampInteger(
   return Math.max(min, Math.min(max, Math.floor(value)));
 }
 
+function compareSearchResults(left: GitSearchResult, right: GitSearchResult): number {
+  return right.score - left.score || left.id.localeCompare(right.id);
+}
+
+function isWorseResult(left: GitSearchResult, right: GitSearchResult): boolean {
+  return compareSearchResults(left, right) > 0;
+}
+
+function retainBoundedResult(
+  heap: GitSearchResult[],
+  candidate: GitSearchResult,
+  limit: number,
+): void {
+  if (heap.length < limit) {
+    heap.push(candidate);
+    let index = heap.length - 1;
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      if (!isWorseResult(heap[index]!, heap[parent]!)) break;
+      [heap[parent], heap[index]] = [heap[index]!, heap[parent]!];
+      index = parent;
+    }
+    return;
+  }
+
+  if (compareSearchResults(candidate, heap[0]!) >= 0) return;
+  heap[0] = candidate;
+  let index = 0;
+  while (true) {
+    const left = index * 2 + 1;
+    if (left >= heap.length) return;
+    const right = left + 1;
+    let worseChild = left;
+    if (right < heap.length && isWorseResult(heap[right]!, heap[left]!)) worseChild = right;
+    if (!isWorseResult(heap[worseChild]!, heap[index]!)) return;
+    [heap[index], heap[worseChild]] = [heap[worseChild]!, heap[index]!];
+    index = worseChild;
+  }
+}
+
 function boundedLevenshtein(left: string, right: string, maxDistance: number): number | undefined {
   if (Math.abs(left.length - right.length) > maxDistance) return undefined;
   if (left === right) return 0;
@@ -501,21 +544,26 @@ export class GitSearchIndex {
     const compiledFilters = compileFilters(query.filters);
     const results: GitSearchResult[] = [];
     let documentsScanned = 0;
+    let matchedDocuments = 0;
     let fuzzyTokensCompared = 0;
     let fuzzyTruncated = false;
 
     for (const id of this.orderedIds) {
       const document = this.cache.get(id)?.document;
       if (!document || !matchesFilters(document, compiledFilters)) continue;
-      if (needle.length > 0 && mode === "fuzzy" && documentsScanned >= fuzzyDocumentBudget) {
+      if (
+        needle.length > 0 &&
+        mode === "fuzzy" &&
+        (documentsScanned >= fuzzyDocumentBudget || fuzzyTokensCompared >= fuzzyTokenBudget)
+      ) {
         fuzzyTruncated = true;
         break;
       }
       documentsScanned += 1;
 
       if (needle.length === 0) {
-        if (results.length < limit)
-          results.push({ id, score: 10, match: "filter", matchedFields: [] });
+        matchedDocuments += 1;
+        retainBoundedResult(results, { id, score: 10, match: "filter", matchedFields: [] }, limit);
         continue;
       }
 
@@ -528,7 +576,8 @@ export class GitSearchIndex {
               ? 120
               : 100
             : 60 + Math.min(20, needle.length) + (fields.includes("id") ? 5 : 0);
-        results.push({ id, score, match: mode, matchedFields: fields });
+        matchedDocuments += 1;
+        retainBoundedResult(results, { id, score, match: mode, matchedFields: fields }, limit);
         continue;
       }
 
@@ -547,23 +596,29 @@ export class GitSearchIndex {
       }
       if (fuzzyTruncated && bestDistance === undefined) break;
       if (bestDistance !== undefined) {
-        results.push({
-          id,
-          score: 50 - bestDistance * 10,
-          match: "fuzzy",
-          matchedFields: matchedFields(document, needle, false),
-        });
+        matchedDocuments += 1;
+        retainBoundedResult(
+          results,
+          {
+            id,
+            score: 50 - bestDistance * 10,
+            match: "fuzzy",
+            matchedFields: matchedFields(document, needle, false),
+          },
+          limit,
+        );
       }
     }
 
-    results.sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
-    const limited = Object.freeze(results.slice(0, limit));
+    const limited = Object.freeze([...results].sort(compareSearchResults));
     return Object.freeze({
       results: limited,
       hitIds: new Set(limited.map((result) => result.id)),
       stats: Object.freeze({
         ...update,
         documentsScanned,
+        matchedDocuments,
+        peakRetainedResults: results.length,
         fuzzyTokensCompared,
         fuzzyTruncated,
       }),

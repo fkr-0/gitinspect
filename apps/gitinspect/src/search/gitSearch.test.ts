@@ -150,6 +150,48 @@ describe("GitSearchIndex", () => {
     expect(outcome.stats.fuzzyTruncated).toBe(true);
   });
 
+  it("bounds retained result candidates while preserving global result ordering", () => {
+    const normalCount = 9_999;
+    const dataset: GraphDataset = {
+      revision: "bounded-result-retention",
+      nodes: [
+        ...Array.from({ length: normalCount }, (_, index) =>
+          node(
+            `commit:${index.toString().padStart(5, "0")}`,
+            "commit",
+            {
+              oid: index.toString(16),
+              message: `Common match ${index}`,
+              authorName: "Scale Fixture",
+            },
+            `Common match ${index}`,
+          ),
+        ),
+        node(
+          "zz-common",
+          "commit",
+          { oid: "special", message: "Common match special", authorName: "Scale Fixture" },
+          "Common match special",
+        ),
+      ],
+      edges: [],
+    };
+    const index = new GitSearchIndex();
+    const outcome = index.search(dataset, { text: "common", mode: "substring", limit: 32 });
+    const repeated = index.search(dataset, { text: "common", mode: "substring", limit: 32 });
+
+    expect(outcome.stats.documentsScanned).toBe(10_000);
+    expect(outcome.stats.matchedDocuments).toBe(10_000);
+    expect(outcome.stats.peakRetainedResults).toBe(32);
+    expect(outcome.results).toHaveLength(32);
+    expect(outcome.results.map((result) => result.id)).toEqual([
+      "zz-common",
+      ...Array.from({ length: 31 }, (_, index) => `commit:${index.toString().padStart(5, "0")}`),
+    ]);
+    expect(repeated.results).toEqual(outcome.results);
+    expect(repeated.stats.peakRetainedResults).toBe(32);
+  });
+
   it("supports object, author, date, ref, signature, loaded-path, and merge filters", () => {
     const dataset = fixture();
     const index = new GitSearchIndex();

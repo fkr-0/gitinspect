@@ -51,6 +51,8 @@ export interface GitScaleBenchmarkResult {
   readonly estimatedProjectionBytes: number;
   readonly estimatedSearchIndexBytes: number;
   readonly searchHitCount: number;
+  readonly searchMatchedDocuments: number;
+  readonly searchPeakRetainedResults: number;
   readonly fuzzyProbe?: GitBoundedFuzzyBenchmarkResult;
 }
 
@@ -146,6 +148,8 @@ export function benchmarkGitScale(input: GitScaleBenchmarkInput): GitScaleBenchm
     estimatedProjectionBytes: model.stats.estimatedProjectionBytes,
     estimatedSearchIndexBytes: indexStats.estimatedIndexBytes,
     searchHitCount: search.hitIds.size,
+    searchMatchedDocuments: search.stats.matchedDocuments,
+    searchPeakRetainedResults: search.stats.peakRetainedResults,
     ...(fuzzyProbe ? { fuzzyProbe } : {}),
   });
 }

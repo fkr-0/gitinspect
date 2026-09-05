@@ -10,11 +10,14 @@ describe("Phase-5 scale benchmark instrumentation", () => {
       const result = benchmarkGitScale({
         dataset,
         camera: { position: [0, -500, 0] },
-        searchQuery: {
-          text: `synthetic commit ${commitCount - 1}`,
-          mode: "exact",
-          limit: 8,
-        },
+        searchQuery:
+          commitCount === 100_000
+            ? { text: "synthetic commit", mode: "substring", limit: 64 }
+            : {
+                text: `synthetic commit ${commitCount - 1}`,
+                mode: "exact",
+                limit: 8,
+              },
         ...(commitCount === 100_000
           ? {
               fuzzyProbe: {
@@ -39,7 +42,8 @@ describe("Phase-5 scale benchmark instrumentation", () => {
       expect(result.estimatedSearchIndexBytes).toBeLessThan(
         result.logicalNodeCount * 2_048 + 10_000_000,
       );
-      expect(result.searchHitCount).toBe(1);
+      expect(result.searchHitCount).toBe(commitCount === 100_000 ? 64 : 1);
+      expect(result.searchPeakRetainedResults).toBeLessThanOrEqual(commitCount === 100_000 ? 64 : 8);
       expect(result.layoutMs).toBeLessThan(15_000);
       expect(result.topologyKeyMs).toBeLessThan(15_000);
       expect(result.plannerMs).toBeLessThan(15_000);
@@ -51,6 +55,8 @@ describe("Phase-5 scale benchmark instrumentation", () => {
         expect(result.layoutNodeCount).toBeLessThan(result.logicalNodeCount / 20);
       }
       if (commitCount === 100_000) {
+        expect(result.searchMatchedDocuments).toBe(100_000);
+        expect(result.searchPeakRetainedResults).toBe(64);
         expect(result.fuzzyProbe).toBeDefined();
         expect(result.fuzzyProbe!.documentsScanned).toBeLessThanOrEqual(4_096);
         expect(result.fuzzyProbe!.tokensCompared).toBeLessThanOrEqual(16_384);
