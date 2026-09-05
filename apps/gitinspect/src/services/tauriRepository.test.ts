@@ -182,4 +182,70 @@ describe("Tauri repository bridge", () => {
     vi.stubGlobal("window", {});
     expect(createTauriRepositoryService()).toBeUndefined();
   });
+
+  it("fails closed when a full refresh replaces the repository identity", async () => {
+    const snapshot = createDemoSnapshot("/native/repo");
+    const replacement = createDemoSnapshot("/native/other");
+    vi.stubGlobal("window", {
+      __TAURI__: {
+        core: {
+          invoke: vi.fn(async (command: string) => {
+            if (command === "refresh_repository_compact_delta") {
+              return {
+                status: "full",
+                session: {
+                  key: "repository:other",
+                  snapshot: compactSnapshot(replacement),
+                },
+              };
+            }
+            throw new Error(`unexpected command ${command}`);
+          }),
+        },
+        event: {
+          listen: vi.fn(),
+        },
+      },
+    });
+
+    const service = createTauriRepositoryService();
+    await expect(
+      service!.refreshRepository({ key: "repository:1", snapshot }),
+    ).rejects.toThrow(/identity mismatch/i);
+  });
+
+  it("retries native watcher cleanup after a failed stop without reattaching the listener", async () => {
+    const snapshot = createDemoSnapshot("/native/repo");
+    const unlisten = vi.fn();
+    let stopAttempts = 0;
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "start_repository_watch") return { watchId: "watch:retry" };
+      if (command === "stop_repository_watch") {
+        stopAttempts += 1;
+        if (stopAttempts === 1) throw new Error("temporary stop failure");
+        return undefined;
+      }
+      throw new Error(`unexpected command ${command}`);
+    });
+    vi.stubGlobal("window", {
+      __TAURI__: {
+        core: { invoke },
+        event: {
+          listen: vi.fn(async () => unlisten),
+        },
+      },
+    });
+
+    const service = createTauriRepositoryService();
+    const stop = await service!.watchRepository({ key: "repository:1", snapshot }, vi.fn());
+
+    await expect(stop()).rejects.toThrow(/temporary stop failure/i);
+    expect(unlisten).toHaveBeenCalledTimes(1);
+    expect(stopAttempts).toBe(1);
+
+    await stop();
+    await stop();
+    expect(unlisten).toHaveBeenCalledTimes(1);
+    expect(stopAttempts).toBe(2);
+  });
 });

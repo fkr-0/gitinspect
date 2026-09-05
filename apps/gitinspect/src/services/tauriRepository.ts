@@ -81,7 +81,19 @@ export function createTauriRepositoryService(): RepositoryService | undefined {
       if (result.status === "delta") {
         return applyCompactRepositoryAppendDelta(session, result.delta);
       }
-      return decodeCompactRepositorySession(result.session);
+      const refreshed = decodeCompactRepositorySession(result.session);
+      if (refreshed.key !== session.key) {
+        throw new Error(
+          `Native full refresh repository identity mismatch: ${refreshed.key} != ${session.key}`,
+        );
+      }
+      if (
+        refreshed.snapshot.repositoryPath !== session.snapshot.repositoryPath ||
+        refreshed.snapshot.gitDir !== session.snapshot.gitDir
+      ) {
+        throw new Error("Native full refresh changed the repository path identity");
+      }
+      return refreshed;
     },
 
     getCommitDiff(session: RepositorySession, oid: string): Promise<GitCommitDiff> {
@@ -126,14 +138,28 @@ export function createTauriRepositoryService(): RepositoryService | undefined {
         throw error;
       }
 
-      let stopped = false;
+      let listenerStopped = false;
+      let nativeStopped = false;
+      let stopInFlight: Promise<void> | undefined;
       return async () => {
-        if (stopped) return;
-        stopped = true;
-        unlisten();
-        await tauri.core.invoke<void>("stop_repository_watch", {
-          watchId: watch.watchId,
-        });
+        if (!listenerStopped) {
+          listenerStopped = true;
+          unlisten();
+        }
+        if (nativeStopped) return;
+        if (!stopInFlight) {
+          stopInFlight = tauri.core
+            .invoke<void>("stop_repository_watch", {
+              watchId: watch.watchId,
+            })
+            .then(() => {
+              nativeStopped = true;
+            })
+            .finally(() => {
+              stopInFlight = undefined;
+            });
+        }
+        await stopInFlight;
       };
     },
   });
