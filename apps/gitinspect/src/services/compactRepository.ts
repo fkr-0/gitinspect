@@ -154,9 +154,14 @@ export function applyCompactRepositoryAppendDelta(
   if (appended.length === 0 || !firstAppended || firstAppended.oid !== delta.head) {
     throw new Error("Compact repository delta does not start at refreshed HEAD");
   }
+  const appendedOids = new Set<string>();
   for (let index = 0; index < appended.length; index += 1) {
     const commit = appended[index];
     if (!commit) throw new Error("Compact repository delta has unexpected gap");
+    if (appendedOids.has(commit.oid)) {
+      throw new Error(`Compact repository delta duplicates appended commit: ${commit.oid}`);
+    }
+    appendedOids.add(commit.oid);
     const nextCommit = appended[index + 1];
     const expectedParent = index + 1 < appended.length && nextCommit ? nextCommit.oid : base.head;
     if (commit.parents.length !== 1 || commit.parents[0] !== expectedParent) {

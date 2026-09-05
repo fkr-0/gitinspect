@@ -113,6 +113,20 @@ describe("compact repository transport", () => {
       applyCompactRepositoryAppendDelta(session, { ...delta, baseRevision: "sha256:stale" }),
     ).toThrow(/base revision mismatch/i);
     expect(() => applyCompactRepositoryAppendDelta(session, delta)).toThrow(/linear append/i);
+
+    const duplicateCommitDelta: CompactRepositoryAppendDelta = {
+      ...delta,
+      commits: {
+        strings: ["new-child", "tree-new", "child", "Scale Fixture", "message"],
+        commits: [
+          [0, 1, [0], 3, null, 4000, 4000, 4, 3],
+          [0, 1, [2], 3, null, 3000, 3000, 4, 3],
+        ],
+      },
+    };
+    expect(() => applyCompactRepositoryAppendDelta(session, duplicateCommitDelta)).toThrow(
+      /duplicates appended commit/i,
+    );
   });
 
   it("expands into the unchanged public metadata-only snapshot contract", () => {
