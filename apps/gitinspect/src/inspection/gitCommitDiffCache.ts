@@ -18,6 +18,76 @@ export interface GitCommitDiffCacheOptions {
   readonly maxFileEntries?: number;
 }
 
+interface PromiseCacheEntry<T> {
+  readonly promise: Promise<T>;
+  lastAccess: number;
+}
+
+class BoundedPromiseCache<T> {
+  private readonly retained = new Map<string, PromiseCacheEntry<T>>();
+  private readonly inFlight = new Map<string, PromiseCacheEntry<T>>();
+  private accessSequence = 0;
+
+  constructor(private readonly maxEntries: number) {}
+
+  getOrCreate(key: string, load: () => Promise<T>): Promise<T> {
+    const pending = this.inFlight.get(key);
+    if (pending) {
+      pending.lastAccess = ++this.accessSequence;
+      return pending.promise;
+    }
+
+    const retained = this.retained.get(key);
+    if (retained) {
+      retained.lastAccess = ++this.accessSequence;
+      return retained.promise;
+    }
+
+    const entry: PromiseCacheEntry<T> = {
+      promise: load(),
+      lastAccess: ++this.accessSequence,
+    };
+    this.inFlight.set(key, entry);
+    void entry.promise.then(
+      () => {
+        if (this.inFlight.get(key) !== entry) return;
+        this.inFlight.delete(key);
+        this.retained.set(key, entry);
+        this.evictLeastRecentlyUsed();
+      },
+      () => {
+        if (this.inFlight.get(key) === entry) this.inFlight.delete(key);
+      },
+    );
+    return entry.promise;
+  }
+
+  clear(): void {
+    this.retained.clear();
+    this.inFlight.clear();
+    this.accessSequence = 0;
+  }
+
+  get size(): number {
+    return this.retained.size;
+  }
+
+  private evictLeastRecentlyUsed(): void {
+    while (this.retained.size > this.maxEntries) {
+      let oldestKey: string | undefined;
+      let oldestAccess = Infinity;
+      for (const [key, entry] of this.retained) {
+        if (entry.lastAccess < oldestAccess) {
+          oldestKey = key;
+          oldestAccess = entry.lastAccess;
+        }
+      }
+      if (oldestKey === undefined) return;
+      this.retained.delete(oldestKey);
+    }
+  }
+}
+
 /**
  * App-local bounded cache for lazy commit diff metadata.
  *
@@ -27,10 +97,8 @@ export interface GitCommitDiffCacheOptions {
  * graph dataset or retaining an unbounded history of inspected commits.
  */
 export class GitCommitDiffCache {
-  private readonly entries = new Map<string, Promise<GitCommitDiff>>();
-  private readonly fileEntries = new Map<string, Promise<GitCommitFileDetail>>();
-  private readonly maxEntries: number;
-  private readonly maxFileEntries: number;
+  private readonly entries: BoundedPromiseCache<GitCommitDiff>;
+  private readonly fileEntries: BoundedPromiseCache<GitCommitFileDetail>;
 
   constructor(
     private readonly repositoryService: RepositoryService,
@@ -44,26 +112,13 @@ export class GitCommitDiffCache {
     if (!Number.isInteger(requestedFileEntries) || requestedFileEntries < 1) {
       throw new Error("GitCommitDiffCache maxFileEntries must be a positive integer.");
     }
-    this.maxEntries = requested;
-    this.maxFileEntries = requestedFileEntries;
+    this.entries = new BoundedPromiseCache(requested);
+    this.fileEntries = new BoundedPromiseCache(requestedFileEntries);
   }
 
   get(session: RepositorySession, oid: string): Promise<GitCommitDiff> {
     const key = cacheKey(session, oid);
-    const existing = this.entries.get(key);
-    if (existing) {
-      this.entries.delete(key);
-      this.entries.set(key, existing);
-      return existing;
-    }
-
-    const pending = this.repositoryService.getCommitDiff(session, oid);
-    this.entries.set(key, pending);
-    this.evictLeastRecentlyUsed();
-    void pending.catch(() => {
-      if (this.entries.get(key) === pending) this.entries.delete(key);
-    });
-    return pending;
+    return this.entries.getOrCreate(key, () => this.repositoryService.getCommitDiff(session, oid));
   }
 
   getFileDetail(
@@ -72,20 +127,9 @@ export class GitCommitDiffCache {
     path: string,
   ): Promise<GitCommitFileDetail> {
     const key = fileCacheKey(session, oid, path);
-    const existing = this.fileEntries.get(key);
-    if (existing) {
-      this.fileEntries.delete(key);
-      this.fileEntries.set(key, existing);
-      return existing;
-    }
-
-    const pending = this.repositoryService.getCommitFileDetail(session, oid, path);
-    this.fileEntries.set(key, pending);
-    this.evictFileLeastRecentlyUsed();
-    void pending.catch(() => {
-      if (this.fileEntries.get(key) === pending) this.fileEntries.delete(key);
-    });
-    return pending;
+    return this.fileEntries.getOrCreate(key, () =>
+      this.repositoryService.getCommitFileDetail(session, oid, path),
+    );
   }
 
   clear(): void {
@@ -99,21 +143,5 @@ export class GitCommitDiffCache {
 
   get fileDetailSize(): number {
     return this.fileEntries.size;
-  }
-
-  private evictLeastRecentlyUsed(): void {
-    while (this.entries.size > this.maxEntries) {
-      const oldestKey = this.entries.keys().next().value as string | undefined;
-      if (oldestKey === undefined) return;
-      this.entries.delete(oldestKey);
-    }
-  }
-
-  private evictFileLeastRecentlyUsed(): void {
-    while (this.fileEntries.size > this.maxFileEntries) {
-      const oldestKey = this.fileEntries.keys().next().value as string | undefined;
-      if (oldestKey === undefined) return;
-      this.fileEntries.delete(oldestKey);
-    }
   }
 }

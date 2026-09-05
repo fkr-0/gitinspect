@@ -114,6 +114,32 @@ describe("GitCommitDiffCache", () => {
     expect(service.getCommitDiffMock).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps in-flight requests deduplicated even when settled retention is full", async () => {
+    const service = new FakeRepositoryService();
+    const resolvers = new Map<string, (value: GitCommitDiff) => void>();
+    service.getCommitDiffMock.mockImplementation(
+      (_session, oid) =>
+        new Promise((resolve) => {
+          resolvers.set(oid, resolve);
+        }),
+    );
+    const cache = new GitCommitDiffCache(service, { maxEntries: 1 });
+    const current = session();
+
+    const firstA = cache.get(current, OID_A);
+    const firstB = cache.get(current, OID_B);
+    const secondA = cache.get(current, OID_A);
+
+    expect(secondA).toBe(firstA);
+    expect(service.getCommitDiffMock).toHaveBeenCalledTimes(2);
+
+    resolvers.get(OID_A)?.(diff(OID_A));
+    resolvers.get(OID_B)?.(diff(OID_B));
+    await expect(firstA).resolves.toEqual(diff(OID_A));
+    await expect(firstB).resolves.toEqual(diff(OID_B));
+    expect(cache.size).toBe(1);
+  });
+
   it("uses bounded LRU retention instead of growing with inspected history", async () => {
     const service = new FakeRepositoryService();
     service.getCommitDiffMock.mockImplementation(async (_session, oid) => diff(oid));
