@@ -150,6 +150,28 @@ describe("GitSearchIndex", () => {
     expect(outcome.stats.fuzzyTruncated).toBe(true);
   });
 
+  it("stops fuzzy scanning before counting a document with no remaining token budget", () => {
+    const dataset: GraphDataset = {
+      revision: "fuzzy-token-budget",
+      nodes: Array.from({ length: 129 }, (_, index) =>
+        node(`doc:${index.toString().padStart(3, "0")}`, "node", {}),
+      ),
+      edges: [],
+    };
+    const outcome = new GitSearchIndex().search(dataset, {
+      text: "definitely-missing",
+      mode: "fuzzy",
+      fuzzyMaxDistance: 1,
+      fuzzyDocumentBudget: 8_192,
+      fuzzyTokenBudget: 256,
+    });
+
+    expect(outcome.results).toEqual([]);
+    expect(outcome.stats.fuzzyTokensCompared).toBe(256);
+    expect(outcome.stats.documentsScanned).toBe(128);
+    expect(outcome.stats.fuzzyTruncated).toBe(true);
+  });
+
   it("bounds retained result candidates while preserving global result ordering", () => {
     const normalCount = 9_999;
     const dataset: GraphDataset = {
