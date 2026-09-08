@@ -3,6 +3,7 @@ name = "gitinspect-app"
 version = "0.2.0"
 description = "gitinspect desktop shell"
 edition = "2024"
+default-run = "gitinspect-app"
 publish = false
 
 [build-dependencies]
