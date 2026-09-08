@@ -10,10 +10,18 @@ commands:
     run: [pnpm, typecheck]
     category: build
     timeoutMs: 120000
+  lint:
+    run: [pnpm, lint]
+    category: lint
+    timeoutMs: 120000
   test:
     run: [pnpm, test]
     category: test
     timeoutMs: 120000
+  test-coverage:
+    run: [pnpm, test:coverage]
+    category: test
+    timeoutMs: 180000
   build:
     run: [pnpm, build]
     category: build
@@ -26,8 +34,20 @@ commands:
     run: [pnpm, release:verify]
     category: test
     timeoutMs: 600000
+  release-candidate:
+    run: [pnpm, release:candidate]
+    category: test
+    timeoutMs: 600000
+  release-metadata-test:
+    run: [pnpm, release:metadata-test]
+    category: test
+    timeoutMs: 120000
   release-package-audit-test:
     run: [pnpm, release:package-audit-test]
+    category: test
+    timeoutMs: 120000
+  release-package-harness-test:
+    run: [pnpm, release:package-harness-test]
     category: test
     timeoutMs: 120000
   release-package-qualify:
