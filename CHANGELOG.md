@@ -9,7 +9,7 @@
 
 ### Changed
 
-- Release/readiness documentation now matches the tagged 0.2.0 metadata, enabled Tauri bundling, green candidate gate, and reproduced Linux AppImage diagnostic; a clean package qualification remains the artifact-acceptance boundary rather than stale helper-download assumptions.
+- Release/readiness documentation now matches the tagged 0.2.0 metadata, enabled Tauri bundling, green candidate gate, and clean Linux AppImage qualification with `releaseQualified=true`; future package authority remains exact-version/exact-commit rather than being inferred from prior artifacts or stale helper-download assumptions.
 - CI now preserves pnpm-before-Node-cache setup ordering, caches Rust targets, uploads TypeScript V8 coverage, enforces warning-fatal root Biome lint, and adversarially tests the fail-closed version/changelog/bundling and package-auditor contracts.
 - Release metadata verification now fails closed when any of the four canonical product version sources diverge in verify or candidate mode, while only candidate-specific bundling/changelog requirements remain warnings under verify.
 - AppImage qualification now confines bundle cleanup and evidence paths to repository-owned release locations, preserves build logs across packaging, and rejects non-executable AppImage artifacts.
