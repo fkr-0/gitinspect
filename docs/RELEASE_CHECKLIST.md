@@ -23,7 +23,7 @@ Use:
 pnpm release:verify
 ```
 
-This runs the complete TypeScript build/test/typecheck/lint matrix, Rust core fmt/clippy/tests, Tauri fmt/clippy/tests/check, and `git diff --check`. Biome warnings are release failures. Verify mode reports candidate-only bundling/changelog metadata without enforcing those candidate-only fields, while canonical version mismatches remain hard failures. This generic regression gate is independent of i3/X11 and remains the cross-platform release verification entry point.
+This runs the complete TypeScript build/test/typecheck/lint matrix, Rust core fmt/clippy/tests, Tauri fmt/clippy/tests/check, and `git diff --check HEAD --` so whitespace errors are rejected across both staged and unstaged changes. Biome warnings are release failures. Verify mode reports candidate-only bundling/changelog metadata without enforcing those candidate-only fields, while canonical version mismatches remain hard failures. This generic regression gate is independent of i3/X11 and remains the cross-platform release verification entry point.
 
 CI runs the same source lanes with pnpm installed before `actions/setup-node` enables the pnpm cache, caches the two Rust targets, and runs `pnpm test:coverage`. The coverage job uploads `apps/gitinspect/coverage` and `packages/graph-elements/coverage` as the `typescript-coverage` artifact. Coverage is reporting evidence, not a percentage threshold, and generated reports are excluded from Biome input so running coverage cannot poison a later release gate.
 

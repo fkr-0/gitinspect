@@ -193,7 +193,7 @@ run_step "Tauri fmt" cargo fmt --manifest-path "$tauri_manifest" -- --check
 run_step "Tauri clippy" cargo clippy --manifest-path "$tauri_manifest" --all-targets -- -D warnings
 run_step "Tauri tests" cargo test --manifest-path "$tauri_manifest"
 run_step "Tauri check" cargo check --manifest-path "$tauri_manifest" --all-targets
-run_step "Git whitespace check" git diff --check
+run_step "Git whitespace check (index + worktree)" git diff --check HEAD --
 
 printf '\nrelease_verification=pass\n'
 if [[ "$mode" == "verify" ]]; then

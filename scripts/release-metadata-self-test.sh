@@ -183,4 +183,28 @@ expect_gate verify-warns-but-does-not-enforce-candidate-metadata --verify 0 \
   "warning=CHANGELOG.md has no release heading for $product_version; work remains under Unreleased" \
   'release_metadata=pass'
 
+restore_fixture
+mkdir -p "$fixture_root/bin"
+cat >"$fixture_root/bin/pnpm" <<'SH'
+#!/usr/bin/env sh
+exit 0
+SH
+cp "$fixture_root/bin/pnpm" "$fixture_root/bin/cargo"
+chmod +x "$fixture_root/bin/pnpm" "$fixture_root/bin/cargo"
+printf '\nstaged-whitespace-regression   \n' >>"$fixture_root/CHANGELOG.md"
+git -C "$fixture_root" add CHANGELOG.md
+set +e
+staged_whitespace_output=$(cd "$fixture_root" && PATH="$fixture_root/bin:$PATH" bash scripts/release-check.sh --candidate 2>&1)
+staged_whitespace_rc=$?
+set -e
+if [[ "$staged_whitespace_rc" -eq 0 ]]; then
+  printf 'FAIL staged-whitespace: full candidate gate accepted staged trailing whitespace\n%s\n' "$staged_whitespace_output" >&2
+  exit 1
+fi
+if [[ "$staged_whitespace_output" != *'trailing whitespace.'* ]]; then
+  printf 'FAIL staged-whitespace: expected git whitespace diagnostic\n%s\n' "$staged_whitespace_output" >&2
+  exit 1
+fi
+printf 'PASS staged-whitespace\n'
+
 printf 'RELEASE_METADATA_SELF_TEST=PASS\n'
