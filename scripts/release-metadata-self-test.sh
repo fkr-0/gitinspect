@@ -12,7 +12,7 @@ trap cleanup EXIT INT TERM
 
 mkdir -p \
   "$fixture_root/scripts" \
-  "$fixture_root/apps/gitinspect/src-tauri" \
+  "$fixture_root/apps/gitinspect/src-tauri/icons" \
   "$fixture_root/crates/gitinspect-core" \
   "$fixture_root/packages/contracts" \
   "$fixture_root/packages/graph-elements"
@@ -20,6 +20,7 @@ mkdir -p \
 cp "$repo_root/scripts/release-check.sh" "$fixture_root/scripts/release-check.sh"
 cp "$repo_root/apps/gitinspect/package.json" "$fixture_root/apps/gitinspect/package.json"
 cp "$repo_root/apps/gitinspect/src-tauri/tauri.conf.json" "$fixture_root/apps/gitinspect/src-tauri/tauri.conf.json"
+cp "$repo_root/apps/gitinspect/src-tauri/icons/icon.png" "$fixture_root/apps/gitinspect/src-tauri/icons/icon.png"
 cp "$repo_root/apps/gitinspect/src-tauri/Cargo.toml" "$fixture_root/apps/gitinspect/src-tauri/Cargo.toml"
 cp "$repo_root/crates/gitinspect-core/Cargo.toml" "$fixture_root/crates/gitinspect-core/Cargo.toml"
 cp "$repo_root/packages/contracts/package.json" "$fixture_root/packages/contracts/package.json"
@@ -33,7 +34,8 @@ git -C "$fixture_root" add .
 git -C "$fixture_root" commit -qm baseline
 
 restore_fixture() {
-  git -C "$fixture_root" checkout -q -- .
+  git -C "$fixture_root" reset -q --hard HEAD
+  git -C "$fixture_root" clean -fdq
 }
 
 run_gate() {
@@ -105,11 +107,18 @@ NODE
 
 expect_gate baseline --candidate 0 \
   'release_metadata=pass' \
-  'bundle_active=true'
+  'bundle_active=true' \
+  'bundle_icon_count=1' \
+  'bundle_square_png=true'
 
 restore_fixture
 mutate_json apps/gitinspect/package.json 'value.version = "9.9.9";'
 expect_gate app-version-mismatch --candidate 2 \
+  "error=@gitinspect/app package version 9.9.9 != product version $product_version"
+
+restore_fixture
+mutate_json apps/gitinspect/package.json 'value.version = "9.9.9";'
+expect_gate verify-app-version-mismatch --verify 2 \
   "error=@gitinspect/app package version 9.9.9 != product version $product_version"
 
 restore_fixture
@@ -128,6 +137,26 @@ expect_gate disabled-bundling --candidate 2 \
   'error=Tauri bundle.active is not true; platform package production is not enabled'
 
 restore_fixture
+mutate_json apps/gitinspect/src-tauri/tauri.conf.json 'delete value.bundle.icon;'
+expect_gate missing-bundle-icon --candidate 2 \
+  'error=Tauri bundle.icon is empty; packaged desktop builds require explicit icon assets'
+
+restore_fixture
+mutate_json apps/gitinspect/src-tauri/tauri.conf.json 'value.bundle.icon = ["icons/missing.png"];'
+expect_gate missing-bundle-icon-file --candidate 2 \
+  'error=Tauri bundle icon is missing: icons/missing.png' \
+  'error=Tauri bundle.icon has no valid square PNG; Linux AppImage packaging requires one'
+
+restore_fixture
+mkdir -p "$fixture_root/external-icons"
+cp "$fixture_root/apps/gitinspect/src-tauri/icons/icon.png" "$fixture_root/external-icons/icon.png"
+rm -rf "$fixture_root/apps/gitinspect/src-tauri/icons"
+ln -s ../../../external-icons "$fixture_root/apps/gitinspect/src-tauri/icons"
+expect_gate symlinked-bundle-icon-parent --candidate 2 \
+  'error=Tauri bundle icon path must not traverse symlinks: icons/icon.png' \
+  'error=Tauri bundle.icon has no valid square PNG; Linux AppImage packaging requires one'
+
+restore_fixture
 node - "$fixture_root/CHANGELOG.md" "$product_version" <<'NODE'
 const fs = require('node:fs');
 const [path, productVersion] = process.argv.slice(2);
@@ -141,7 +170,6 @@ expect_gate missing-release-heading --candidate 2 \
   "error=CHANGELOG.md has no release heading for $product_version; work remains under Unreleased"
 
 restore_fixture
-mutate_json apps/gitinspect/package.json 'value.version = "9.9.9";'
 mutate_json apps/gitinspect/src-tauri/tauri.conf.json 'value.bundle.active = false;'
 node - "$fixture_root/CHANGELOG.md" "$product_version" <<'NODE'
 const fs = require('node:fs');
@@ -151,7 +179,6 @@ const escaped = productVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 fs.writeFileSync(path, source.replace(new RegExp(`^## \\[${escaped}\\].*$`, 'm'), '## [9.9.9] - 2099-01-01'));
 NODE
 expect_gate verify-warns-but-does-not-enforce-candidate-metadata --verify 0 \
-  "warning=@gitinspect/app package version 9.9.9 != product version $product_version" \
   'warning=Tauri bundle.active is not true; platform package production is not enabled' \
   "warning=CHANGELOG.md has no release heading for $product_version; work remains under Unreleased" \
   'release_metadata=pass'

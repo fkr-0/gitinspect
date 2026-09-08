@@ -394,6 +394,14 @@ function isWorseResult(left: GitSearchResult, right: GitSearchResult): boolean {
   return compareSearchResults(left, right) > 0;
 }
 
+function heapResultAt(heap: readonly GitSearchResult[], index: number): GitSearchResult {
+  const result = heap[index];
+  if (result === undefined) {
+    throw new Error(`search result heap invariant violated at index ${index}`);
+  }
+  return result;
+}
+
 function retainBoundedResult(
   heap: GitSearchResult[],
   candidate: GitSearchResult,
@@ -404,14 +412,14 @@ function retainBoundedResult(
     let index = heap.length - 1;
     while (index > 0) {
       const parent = Math.floor((index - 1) / 2);
-      if (!isWorseResult(heap[index]!, heap[parent]!)) break;
-      [heap[parent], heap[index]] = [heap[index]!, heap[parent]!];
+      if (!isWorseResult(heapResultAt(heap, index), heapResultAt(heap, parent))) break;
+      [heap[parent], heap[index]] = [heapResultAt(heap, index), heapResultAt(heap, parent)];
       index = parent;
     }
     return;
   }
 
-  if (compareSearchResults(candidate, heap[0]!) >= 0) return;
+  if (compareSearchResults(candidate, heapResultAt(heap, 0)) >= 0) return;
   heap[0] = candidate;
   let index = 0;
   while (true) {
@@ -419,9 +427,17 @@ function retainBoundedResult(
     if (left >= heap.length) return;
     const right = left + 1;
     let worseChild = left;
-    if (right < heap.length && isWorseResult(heap[right]!, heap[left]!)) worseChild = right;
-    if (!isWorseResult(heap[worseChild]!, heap[index]!)) return;
-    [heap[index], heap[worseChild]] = [heap[worseChild]!, heap[index]!];
+    if (
+      right < heap.length &&
+      isWorseResult(heapResultAt(heap, right), heapResultAt(heap, left))
+    ) {
+      worseChild = right;
+    }
+    if (!isWorseResult(heapResultAt(heap, worseChild), heapResultAt(heap, index))) return;
+    [heap[index], heap[worseChild]] = [
+      heapResultAt(heap, worseChild),
+      heapResultAt(heap, index),
+    ];
     index = worseChild;
   }
 }

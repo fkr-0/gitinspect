@@ -11,37 +11,47 @@ jobs:
   typescript:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.3.0
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm release:metadata
       - run: pnpm release:metadata-test
+      - run: pnpm release:package-audit-test
       - run: pnpm lint
-      - run: pnpm check
+      - run: pnpm typecheck
+      - run: pnpm test:coverage
+      - run: pnpm build
+      - name: Upload TypeScript coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: typescript-coverage
+          path: |
+            apps/gitinspect/coverage
+            packages/graph-elements/coverage
+          if-no-files-found: error
 
   rust-core:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Check gitinspect-core when present
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/gitinspect-core -> target
+      - name: Check gitinspect-core
         shell: bash
         run: |
           set -euo pipefail
           manifest=crates/gitinspect-core/Cargo.toml
-          if [[ ! -f "$manifest" ]]; then
-            echo "gitinspect-core has not landed yet; skipping Rust core checks"
-            exit 0
-          fi
           cargo fmt --manifest-path "$manifest" --check
           cargo clippy --manifest-path "$manifest" --all-targets -- -D warnings
           cargo test --manifest-path "$manifest"
@@ -49,10 +59,13 @@ jobs:
   tauri-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/gitinspect/src-tauri -> target
       - name: Install Linux Tauri build dependencies
         run: |
           sudo apt-get update
@@ -67,15 +80,11 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf
-      - name: Qualify Tauri crate when present
+      - name: Qualify Tauri crate
         shell: bash
         run: |
           set -euo pipefail
           manifest=apps/gitinspect/src-tauri/Cargo.toml
-          if [[ ! -f "$manifest" ]]; then
-            echo "Tauri shell has not landed yet; skipping native app checks"
-            exit 0
-          fi
           cargo fmt --manifest-path "$manifest" -- --check
           cargo clippy --manifest-path "$manifest" --all-targets -- -D warnings
           cargo test --manifest-path "$manifest"

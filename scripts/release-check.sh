@@ -49,6 +49,7 @@ printf 'gitinspect release gate\nmode=%s\nhead=%s\nbranch=%s\n' \
 
 MODE="$mode" node <<'NODE'
 const fs = require('node:fs');
+const path = require('node:path');
 
 function readJson(path) {
   return JSON.parse(fs.readFileSync(path, 'utf8'));
@@ -72,6 +73,11 @@ const productVersion = String(tauriConfig.version);
 
 const errors = [];
 const warnings = [];
+function candidateProblem(message) {
+  if (mode === 'candidate') errors.push(message);
+  else warnings.push(message);
+}
+
 if (tauriCargo !== productVersion) {
   errors.push(`Tauri Cargo version ${tauriCargo} != tauri.conf.json ${productVersion}`);
 }
@@ -79,14 +85,63 @@ if (coreCargo !== productVersion) {
   errors.push(`gitinspect-core version ${coreCargo} != product version ${productVersion}`);
 }
 if (appPackage.version !== productVersion) {
-  const message = `@gitinspect/app package version ${appPackage.version} != product version ${productVersion}`;
-  if (mode === 'candidate') errors.push(message);
-  else warnings.push(message);
+  errors.push(`@gitinspect/app package version ${appPackage.version} != product version ${productVersion}`);
 }
 if (tauriConfig.bundle?.active !== true) {
-  const message = 'Tauri bundle.active is not true; platform package production is not enabled';
-  if (mode === 'candidate') errors.push(message);
-  else warnings.push(message);
+  candidateProblem('Tauri bundle.active is not true; platform package production is not enabled');
+}
+
+const bundleRoot = path.resolve('apps/gitinspect/src-tauri');
+function hasSymlinkComponent(root, target) {
+  const relative = path.relative(root, target);
+  let current = root;
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    if (!fs.existsSync(current)) return false;
+    if (fs.lstatSync(current).isSymbolicLink()) return true;
+  }
+  return false;
+}
+const bundleIcons = Array.isArray(tauriConfig.bundle?.icon)
+  ? tauriConfig.bundle.icon.filter((value) => typeof value === 'string' && value.length > 0)
+  : [];
+let squarePngIcon = false;
+for (const icon of bundleIcons) {
+  const resolved = path.resolve(bundleRoot, icon);
+  if (resolved !== bundleRoot && !resolved.startsWith(`${bundleRoot}${path.sep}`)) {
+    candidateProblem(`Tauri bundle icon escapes src-tauri: ${icon}`);
+    continue;
+  }
+  if (hasSymlinkComponent(bundleRoot, resolved)) {
+    candidateProblem(`Tauri bundle icon path must not traverse symlinks: ${icon}`);
+    continue;
+  }
+  let stat;
+  try {
+    stat = fs.lstatSync(resolved);
+  } catch {
+    candidateProblem(`Tauri bundle icon is missing: ${icon}`);
+    continue;
+  }
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    candidateProblem(`Tauri bundle icon must be a regular non-symlink file: ${icon}`);
+    continue;
+  }
+  if (path.extname(icon).toLowerCase() !== '.png') continue;
+  const header = fs.readFileSync(resolved).subarray(0, 24);
+  const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (header.length < 24 || !header.subarray(0, 8).equals(pngSignature)) {
+    candidateProblem(`Tauri bundle PNG icon has an invalid header: ${icon}`);
+    continue;
+  }
+  const width = header.readUInt32BE(16);
+  const height = header.readUInt32BE(20);
+  if (width > 0 && width === height) squarePngIcon = true;
+}
+if (bundleIcons.length === 0) {
+  candidateProblem('Tauri bundle.icon is empty; packaged desktop builds require explicit icon assets');
+} else if (!squarePngIcon) {
+  candidateProblem('Tauri bundle.icon has no valid square PNG; Linux AppImage packaging requires one');
 }
 
 const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
@@ -94,8 +149,7 @@ const escapedVersion = productVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const versionHeading = new RegExp(`^##\\s+(?:\\[)?${escapedVersion}(?:\\])?(?:\\s|$)`, 'm');
 if (!versionHeading.test(changelog)) {
   const message = `CHANGELOG.md has no release heading for ${productVersion}; work remains under Unreleased`;
-  if (mode === 'candidate') errors.push(message);
-  else warnings.push(message);
+  candidateProblem(message);
 }
 
 console.log(`product_version=${productVersion}`);
@@ -105,6 +159,8 @@ console.log(`app_package_version=${appPackage.version}`);
 console.log(`contracts_private_version=${contractsPackage.version}`);
 console.log(`graph_elements_private_version=${graphElementsPackage.version}`);
 console.log(`bundle_active=${String(tauriConfig.bundle?.active === true)}`);
+console.log(`bundle_icon_count=${bundleIcons.length}`);
+console.log(`bundle_square_png=${String(squarePngIcon)}`);
 for (const warning of warnings) console.log(`warning=${warning}`);
 for (const error of errors) console.error(`error=${error}`);
 if (errors.length > 0) process.exit(2);

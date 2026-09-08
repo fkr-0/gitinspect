@@ -5,6 +5,7 @@
       "**",
       "!!**/node_modules",
       "!!**/dist",
+      "!!**/coverage",
       "!!**/pnpm-lock.yaml",
       "!!**/.ws-bridge",
       "!!**/target",
