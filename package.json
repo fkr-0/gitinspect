@@ -15,6 +15,7 @@
     "release:metadata": "bash scripts/release-check.sh --candidate --metadata-only",
     "release:metadata-test": "bash scripts/release-metadata-self-test.sh",
     "release:package-audit-test": "node scripts/release-package-audit.mjs --self-test",
+    "release:package-harness-test": "bash scripts/release-package-qualification.sh --self-test",
     "release:package-qualify": "bash scripts/release-package-qualification.sh",
     "release:verify": "bash scripts/release-check.sh --verify",
     "release:candidate": "bash scripts/release-check.sh --candidate",

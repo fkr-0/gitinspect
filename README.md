@@ -59,11 +59,12 @@ pnpm lint
 pnpm build
 pnpm release:metadata-test
 pnpm release:package-audit-test
+pnpm release:package-harness-test
 pnpm release:verify
 pnpm release:candidate
 ```
 
-`pnpm release:verify` is the display-independent regression gate across TypeScript, Rust core, Tauri, lint/build/tests, and whitespace checks. `pnpm release:candidate` additionally enforces release metadata: all four product version surfaces must agree, bundling must be enabled, and the changelog must contain the release heading. `pnpm test:coverage` produces local V8 coverage reports for the app and graph-elements; CI uploads those reports as an artifact.
+`pnpm release:verify` is the display-independent regression gate across TypeScript, Rust core, Tauri, lint/build/tests, and whitespace checks. `pnpm release:candidate` additionally enforces release metadata: all four product version surfaces must agree, bundling must be enabled, and the changelog must contain the release heading. `pnpm release:package-harness-test` is the Linux AppImage harness regression gate; it proves interrupted qualification preserves the previous summary and cleans unpublished run state. `pnpm test:coverage` produces local V8 coverage reports for the app and graph-elements; CI uploads those reports as an artifact.
 
 Linux i3/X11 native projection qualification and AppImage qualification are intentionally separate environment-sensitive authorities. Read `docs/RELEASE_CHECKLIST.md` before running `pnpm release:native-qualify` or `pnpm release:package-qualify`.
 

@@ -18,7 +18,7 @@ Options:
   --bundle-dir PATH         Override the AppImage bundle directory.
   --summary PATH            Override the machine-readable result filename; it
                             must resolve directly inside this worktree's Git metadata.
-  --self-test               Run only the package-auditor self-test.
+  --self-test               Run package-auditor and interruption-preservation self-tests.
   -h, --help                Show this help.
 EOF
 }
@@ -49,7 +49,89 @@ cd "$repo_root"
 
 if ((self_test)); then
   node scripts/release-package-audit.mjs --self-test
-  exit $?
+
+  self_test_platform=$(uname -s 2>/dev/null || printf unknown)
+  if [[ "$self_test_platform" != 'Linux' ]]; then
+    printf 'RELEASE_PACKAGE_QUALIFICATION_SELF_TEST=NOT_APPLICABLE platform=%s lane=linux-appimage\n' "$self_test_platform" >&2
+    exit 2
+  fi
+  for tool in git node sha256sum mktemp timeout; do
+    command -v "$tool" >/dev/null || {
+      printf 'RELEASE_PACKAGE_QUALIFICATION_SELF_TEST=PREREQUISITE_UNAVAILABLE tool=%s\n' "$tool" >&2
+      exit 2
+    }
+  done
+
+  mkdir -p "$repo_root/tmp"
+  self_test_root=$(mktemp -d "$repo_root/tmp/release-package-harness-self-test.XXXXXX")
+  cleanup_self_test() {
+    rm -rf -- "$self_test_root"
+  }
+  trap cleanup_self_test EXIT INT TERM
+
+  mkdir -p "$self_test_root/scripts" "$self_test_root/bin"
+  cp -- "$repo_root/scripts/release-package-qualification.sh" "$self_test_root/scripts/release-package-qualification.sh"
+  cat >"$self_test_root/bin/pnpm" <<'SH'
+#!/usr/bin/env sh
+trap 'exit 143' TERM
+trap 'exit 130' INT
+sleep 30
+SH
+  chmod +x "$self_test_root/bin/pnpm"
+  git -C "$self_test_root" init -q -b main
+  git -C "$self_test_root" config user.name 'GitInspect package harness self-test'
+  git -C "$self_test_root" config user.email 'package-harness-self-test@gitinspect.invalid'
+  git -C "$self_test_root" add scripts bin
+  git -C "$self_test_root" -c commit.gpgSign=false commit -qm baseline
+
+  self_test_git_dir=$(git -C "$self_test_root" rev-parse --absolute-git-dir)
+  self_test_summary="$self_test_git_dir/gitinspect-package-prior.json"
+  printf '%s\n' '{"sentinel":"preserve-me"}' >"$self_test_summary"
+  self_test_before=$(sha256sum "$self_test_summary" | awk '{print $1}')
+  self_test_output="$self_test_root/interruption.txt"
+
+  set +e
+  (
+    cd "$self_test_root"
+    PATH="$self_test_root/bin:$PATH" timeout --signal=TERM --kill-after=2s 1s \
+      bash scripts/release-package-qualification.sh \
+      --allow-dirty-diagnostic \
+      --summary "$self_test_summary"
+  ) >"$self_test_output" 2>&1
+  self_test_exit=$?
+  set -e
+
+  if [[ "$self_test_exit" -ne 124 ]]; then
+    printf 'FAIL package-interruption: expected timeout exit 124, got %s\n' "$self_test_exit" >&2
+    cat "$self_test_output" >&2
+    exit 1
+  fi
+  if [[ ! -f "$self_test_summary" ]]; then
+    printf 'FAIL package-interruption: previous summary was removed\n' >&2
+    cat "$self_test_output" >&2
+    exit 1
+  fi
+  self_test_after=$(sha256sum "$self_test_summary" | awk '{print $1}')
+  if [[ "$self_test_before" != "$self_test_after" ]]; then
+    printf 'FAIL package-interruption: previous summary changed\n' >&2
+    exit 1
+  fi
+  if ! grep -qx 'RELEASE_PACKAGE_QUALIFICATION=INTERRUPTED signal=TERM' "$self_test_output"; then
+    printf 'FAIL package-interruption: explicit TERM classification missing\n' >&2
+    cat "$self_test_output" >&2
+    exit 1
+  fi
+  if find "$self_test_git_dir" -maxdepth 1 -type d -name 'gitinspect-package-prior.evidence.*' -print -quit | grep -q .; then
+    printf 'FAIL package-interruption: uncommitted evidence directory leaked\n' >&2
+    exit 1
+  fi
+  if [[ -d "$self_test_root/tmp" ]] && find "$self_test_root/tmp" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+    printf 'FAIL package-interruption: runtime directory leaked\n' >&2
+    exit 1
+  fi
+
+  printf 'RELEASE_PACKAGE_QUALIFICATION_SELF_TEST=PASS\n'
+  exit 0
 fi
 
 platform=$(uname -s 2>/dev/null || printf unknown)
@@ -133,16 +215,26 @@ set -e
 ((summary_path_exit == 0)) || exit "$summary_path_exit"
 mkdir -p "$repo_root/tmp"
 runtime_dir=$(mktemp -d "$repo_root/tmp/release-package-qualification.XXXXXX")
+evidence_dir=''
+evidence_committed=0
 cleanup_runtime() {
+  if [[ -n "$evidence_dir" && "$evidence_committed" -eq 0 ]]; then
+    rm -rf -- "$evidence_dir"
+  fi
   rm -rf -- "$runtime_dir"
 }
-trap cleanup_runtime EXIT INT TERM
-rm -f \
-  "$summary_path" \
-  "$summary_path.artifacts.json" \
-  "$summary_path.build.txt" \
-  "$summary_path.prebundle-smoke.txt" \
-  "$summary_path.smoke.txt"
+interrupt_qualification() {
+  local signal=$1
+  local exit_code=$2
+  trap - INT TERM
+  printf 'RELEASE_PACKAGE_QUALIFICATION=INTERRUPTED signal=%s\n' "$signal" >&2
+  cleanup_runtime
+  trap - EXIT
+  exit "$exit_code"
+}
+trap cleanup_runtime EXIT
+trap 'interrupt_qualification INT 130' INT
+trap 'interrupt_qualification TERM 143' TERM
 
 dirty=$(git status --porcelain --untracked-files=normal)
 release_qualified=true
@@ -168,8 +260,11 @@ pnpm release:candidate
 
 pnpm --filter @gitinspect/app exec tauri --version
 version=$(node -p "require('./apps/gitinspect/package.json').version")
+summary_base=$(basename -- "$summary_path")
+summary_stem=${summary_base%.json}
+evidence_dir=$(mktemp -d "$git_dir/${summary_stem}.evidence.XXXXXX")
 rm -rf "$bundle_dir"
-build_log="$summary_path.build.txt"
+build_log="$evidence_dir/build.txt"
 runtime_build_log="$runtime_dir/build.txt"
 set +e
 # linuxdeploy's bundled strip does not understand SHT_RELR sections emitted by
@@ -198,7 +293,7 @@ if ((build_exit != 0)); then
   release_binary="$repo_root/apps/gitinspect/src-tauri/target/release/gitinspect-app"
   prebundle_smoke_status=not-run
   prebundle_smoke_sha=''
-  prebundle_smoke_output="$summary_path.prebundle-smoke.txt"
+  prebundle_smoke_output="$evidence_dir/prebundle-smoke.txt"
   if [[ -x "$release_binary" ]]; then
     set +e
     "$release_binary" --release-smoke --repository "$repo_root" >"$prebundle_smoke_output" 2>&1
@@ -215,6 +310,7 @@ if ((build_exit != 0)); then
     fi
   fi
 
+  evidence_committed=1
   node -e '
 const fs = require("node:fs");
 const path = require("node:path");
@@ -261,7 +357,7 @@ fi
 
 build_sha=$(sha256sum "$build_log" | awk '{print $1}')
 
-artifact_manifest="$summary_path.artifacts.json"
+artifact_manifest="$evidence_dir/artifacts.json"
 node scripts/release-package-audit.mjs \
   --bundle-dir "$bundle_dir" \
   --expected-version "$version" \
@@ -289,7 +385,7 @@ appimage=${appimages[0]}
   exit 1
 }
 
-smoke_output="$summary_path.smoke.txt"
+smoke_output="$evidence_dir/smoke.txt"
 set +e
 APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --release-smoke --repository "$repo_root" >"$smoke_output" 2>&1
 smoke_exit=$?
@@ -306,6 +402,7 @@ fi
 smoke_sha=$(sha256sum "$smoke_output" | awk '{print $1}')
 head=$(git rev-parse HEAD)
 recorded_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+evidence_committed=1
 node -e '
 const fs = require("node:fs");
 const path = require("node:path");

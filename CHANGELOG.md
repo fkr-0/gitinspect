@@ -9,10 +9,10 @@
 
 ### Changed
 
-- Release/readiness documentation now matches the tagged 0.2.0 metadata, enabled Tauri bundling, green candidate gate, and clean Linux AppImage qualification with `releaseQualified=true`; package hashes are treated as per-run provenance because consecutive clean builds are not byte-identical, and future package authority remains exact-version/exact-commit rather than being inferred from prior artifacts.
-- CI now preserves pnpm-before-Node-cache setup ordering, caches Rust targets, uploads TypeScript V8 coverage, enforces warning-fatal root Biome lint, and adversarially tests the fail-closed version/changelog/bundling and package-auditor contracts.
+- Release/readiness documentation now matches the tagged 0.2.0 metadata, enabled Tauri bundling, green source/candidate gates, and the historical clean Linux AppImage qualification at `19848b0`; package hashes and qualification receipts are treated as per-run, exact-commit provenance, so the post-hardening revision requires its own fresh clean package receipt rather than inheriting prior artifact authority.
+- CI now preserves pnpm-before-Node-cache setup ordering, caches Rust targets, uploads TypeScript V8 coverage, enforces warning-fatal root Biome lint, and adversarially tests the fail-closed version/changelog/bundling, package-auditor, and interrupted-package-harness contracts.
 - Release metadata verification now fails closed when any of the four canonical product version sources diverge in verify or candidate mode, while only candidate-specific bundling/changelog requirements remain warnings under verify; the final Git whitespace gate now covers staged and unstaged changes and has a staged-whitespace regression fixture.
-- AppImage qualification now confines bundle cleanup and evidence paths to repository-owned release locations, preserves build logs across packaging, and rejects non-executable AppImage artifacts.
+- AppImage qualification now confines bundle cleanup and evidence paths to repository-owned release locations, preserves build logs across packaging, rejects non-executable AppImage artifacts, retains prior qualification receipts across interrupted attempts, stores new run sidecars in unique Git-metadata evidence directories, and exits fail-closed on `INT`/`TERM` instead of continuing after cleanup.
 - Interaction coverage now locks `PickRegistry` key separation, duplicate rejection, immutable record snapshots, instance fallback, and stale-disposer safety.
 
 ## [0.2.0] - 2026-08-30

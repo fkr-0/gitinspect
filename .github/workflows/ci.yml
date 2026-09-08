@@ -24,6 +24,7 @@ jobs:
       - run: pnpm release:metadata
       - run: pnpm release:metadata-test
       - run: pnpm release:package-audit-test
+      - run: pnpm release:package-harness-test
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test:coverage
