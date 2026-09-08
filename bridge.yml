@@ -26,6 +26,14 @@ commands:
     run: [pnpm, release:verify]
     category: test
     timeoutMs: 600000
+  release-package-audit-test:
+    run: [pnpm, release:package-audit-test]
+    category: test
+    timeoutMs: 120000
+  release-package-qualify:
+    run: [pnpm, release:package-qualify]
+    category: test
+    timeoutMs: 1200000
   release-native-qualify:
     run: [pnpm, release:native-qualify]
     category: test
@@ -35,8 +43,8 @@ agent:
     Preserve unrelated changes, never write to bare /tmp, coordinate concurrent writes with
     ws-bridge path claims, and keep mutations preview-first and copy-by-default.
   tasks:
-    - Build graph-elements framework primitives.
-    - Build Rust/gix repository backend.
-    - Integrate Git mappings into the Tauri application.
+    - Keep 0.2.x source and candidate release verification fail-closed.
+    - Qualify Linux release packages with retained artifact/runtime evidence.
+    - Keep release documentation and reusable API/support claims aligned with evidence.
   changelog:
     - Keep CHANGELOG.md updated under Unreleased for every meaningful change.

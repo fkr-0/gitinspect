@@ -27,6 +27,28 @@
                        local repository
 ```
 
+### Runtime request path
+
+The frontend never imports `gitinspect-core` or receives reusable filesystem authority directly. Repository requests flow through the typed frontend service layer into Tauri IPC, then through the narrow backend adapters in `apps/gitinspect/src-tauri/src/repository_commands.rs` and `mutation_preview_commands.rs`, which own Rust-side session IDs and call `gitinspect-core`. Responses are serialized back into app contracts before the React/graph-elements world derives visual state.
+
+```text
+React/UI state
+    |
+    v
+frontend repository / mutation-preview services
+    |
+    v  Tauri invoke + repository://changed events
+repository_commands.rs / mutation_preview_commands.rs
+    |
+    v
+gitinspect-core RepositoryService + preview authority
+    |
+    v
+local Git repository or GitInspect-owned disposable preview copy
+```
+
+The packaged-release smoke is intentionally narrower than normal startup. `gitinspect-app --release-smoke --repository <path>` exits before Tauri/WebKit startup and performs only a bounded read-only `gitinspect-core` repository open. It exists to prove that the packaged native binary can load repository authority while still reporting `original_apply_authorized=false`; it is not GUI/WebGL qualification.
+
 ## 2. Workspace ownership
 
 ### `packages/contracts`

@@ -11,7 +11,9 @@ Canonical version sources today:
 - `apps/gitinspect/src-tauri/tauri.conf.json` — product version;
 - `apps/gitinspect/src-tauri/Cargo.toml` — desktop crate version;
 - `crates/gitinspect-core/Cargo.toml` — core crate version;
-- `apps/gitinspect/package.json` — frontend package version, which must match before a release candidate is cut.
+- `apps/gitinspect/package.json` — frontend package version.
+
+All four canonical product versions must agree in both verify and candidate modes. Candidate mode adds packaging/changelog requirements; it does not relax source-version consistency.
 
 ## Reproducible local gates
 
@@ -21,7 +23,9 @@ Use:
 pnpm release:verify
 ```
 
-This runs the complete TypeScript build/test/typecheck/lint matrix, Rust core fmt/clippy/tests, Tauri fmt/clippy/tests/check, and `git diff --check`. Verify mode reports release-candidate metadata without enforcing it. This generic regression gate is independent of i3/X11 and remains the cross-platform release verification entry point.
+This runs the complete TypeScript build/test/typecheck/lint matrix, Rust core fmt/clippy/tests, Tauri fmt/clippy/tests/check, and `git diff --check`. Biome warnings are release failures. Verify mode reports candidate-only bundling/changelog metadata without enforcing those candidate-only fields, while canonical version mismatches remain hard failures. This generic regression gate is independent of i3/X11 and remains the cross-platform release verification entry point.
+
+CI runs the same source lanes with pnpm installed before `actions/setup-node` enables the pnpm cache, caches the two Rust targets, and runs `pnpm test:coverage`. The coverage job uploads `apps/gitinspect/coverage` and `packages/graph-elements/coverage` as the `typescript-coverage` artifact. Coverage is reporting evidence, not a percentage threshold, and generated reports are excluded from Biome input so running coverage cannot poison a later release gate.
 
 For the Linux i3/X11 native GPU/projection qualification lane, also use:
 
@@ -43,6 +47,19 @@ Candidate mode fails closed unless product/core/Tauri/frontend versions agree, T
 
 On the current 0.2.0 baseline, `pnpm release:candidate` passes with all four product version surfaces at `0.2.0`, `bundle.active=true`, and the dated `0.2.0` changelog section present.
 
+For the actual Linux distributable, use:
+
+```sh
+pnpm release:package-audit-test
+pnpm release:package-qualify
+```
+
+The package gate is stricter than source verification: it requires a clean worktree, reruns the full candidate gate, builds the AppImage, hashes and validates the product/version/executable artifact, and then executes the packaged binary through a bounded read-only `gitinspect-core` repository-open smoke. The packaged smoke exits before Tauri/WebKit startup and must report `original_apply_authorized=false`; it is package/runtime evidence, not a substitute for the Linux X11/i3 GUI/projection gate. During development, `scripts/release-package-qualification.sh --allow-dirty-diagnostic` may diagnose the lane, but it always records `releaseQualified=false` and cannot satisfy release acceptance.
+
+The package gate also distinguishes environment/bootstrap failures from product build failures and retains a hashed build log. Qualification on 2026-08-31 exposed two concrete package defects before producing an artifact: Tauri had no explicit square bundle icon, and linuxdeploy's bundled `strip` rejected current rolling-release libraries that use `SHT_RELR` / `.relr.dyn`. The release configuration now names the tracked 64×64 PNG icon, candidate metadata validates that at least one regular in-tree square PNG exists, and the AppImage build runs linuxdeploy with `NO_STRIP=1` so modern libraries are preserved rather than rejected by the older bundled strip tool.
+
+The package harness itself is fail-closed: an overridden `--bundle-dir` must resolve to a direct, non-symlink child of the repository's Tauri bundle directory before any recursive cleanup occurs; an overridden `--summary` must resolve to a direct non-symlink file inside this worktree's Git metadata directory; and build output is captured in a repository-local temporary runtime directory before being copied into Git metadata as durable evidence. The 2026-09-08 dirty diagnostic completes end-to-end, produces an executable 107,833,848-byte AppImage, records SHA-256 `7e5ae4b31f71ff20be46803e6993c10cede76c0ab09502debe9380286a482e9c`, and executes the packaged read-only repository smoke with 64 bounded commits and `original_apply_authorized=false`. That result remains `releaseQualified=false` solely because diagnostic mode ran from the intentionally dirty development worktree. Network/cache/bootstrap failures remain classified as `PREREQUISITE_UNAVAILABLE`; they are not the current implementation blocker.
+
 ## Current 0.2.0 state
 
 ### Qualified product capability
@@ -59,9 +76,9 @@ On the current 0.2.0 baseline, `pnpm release:candidate` passes with all four pro
 
 ### Release blockers still open
 
-1. **Packaged desktop artifact smoke is still missing.** Bundling is enabled and candidate metadata passes, but a produced installer/AppImage/bundle has not yet been exercised as the release artifact.
+1. **A clean packaged AppImage qualification is still missing.** The end-to-end dirty diagnostic now produces, audits, and executes a real AppImage successfully, but diagnostic mode is deliberately not release authority. Freeze the next candidate on a clean worktree and rerun `pnpm release:package-qualify` until it records `PASS` with `releaseQualified=true`.
 2. **Cross-platform packaged compatibility evidence is partial.** Linux repository/runtime evidence is strong, but packaged macOS/Windows execution remains unproven and must not be inferred from source-level CI.
-3. **Documentation/API reference remains incomplete.** Architecture/specification/release safety docs are strong, but a concise user tutorial plus public API/reference surface for graph-elements/contracts still needs release-oriented consolidation.
+3. **Public API reference remains incomplete.** README now carries the concise source-install/run/user workflow and safety boundary, while a consolidated reusable API/reference surface for graph-elements/contracts still needs release-oriented consolidation.
 4. **Remote publication is not configured in this checkout.** There is no Git remote, so push/GitHub release/Pages publication remains a separate operator-visible action rather than a local release-gate side effect.
 
 The experimental browser/WebAssembly/GitHub Pages work is a separate, explicitly synthetic/browser provenance track. Its completion does not satisfy desktop packaging or native-repository release gates.
@@ -82,7 +99,7 @@ Before creating any future local release tag or treating a commit as a new candi
 
 - `pnpm release:candidate` passes from the candidate revision;
 - expected source/release metadata diff is reviewed and no unrelated dirty work is absorbed;
-- platform bundle production is enabled; any platform claimed as packaged-release-qualified must also have a produced artifact smoke test;
+- platform bundle production is enabled; the Linux public-release lane passes clean `pnpm release:package-qualify` with `releaseQualified=true`, while any additional platform claimed as packaged-release-qualified has equivalent produced-artifact execution evidence;
 - changelog/version surfaces agree on the exact candidate version;
 - compatibility and performance evidence are attached to the candidate;
 - the Linux i3/X11 native qualification lane passes `pnpm release:native-qualify` before any native GPU/projection acceptance is claimed for that environment;

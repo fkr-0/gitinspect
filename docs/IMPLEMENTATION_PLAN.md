@@ -94,16 +94,17 @@ Delivered across the current shared product tree and its durable evidence:
 
 ## Phase 6 — release
 
-Status: **0.2.0 local release baseline complete; broader platform/artifact qualification remains open.**
+Status: **0.2.0 local release baseline complete; first public packaged-release runway is now explicit.**
 
-- end-to-end safety and regression suite: **qualified** — `pnpm release:verify` provides one repeatable display-independent gate spanning TypeScript, core Rust, Tauri, lint/build/tests and diff-check; the 0.2.0 candidate gate also passes with converged metadata;
-- Tauri packaging configuration: **enabled** — `bundle.active=true`; however a produced installer/AppImage/bundle has not yet been qualified as a packaged release artifact;
-- docs/tutorial/API reference: **partial** — specification/architecture/safety evidence are strong and release docs are current, but a concise user tutorial plus public graph-elements/contracts API reference remains useful follow-up work;
+- end-to-end safety and regression suite: **qualified** — `pnpm release:verify` provides one repeatable display-independent gate spanning TypeScript, core Rust, Tauri, warning-fatal Biome lint, build/tests and diff-check; the 0.2.0 candidate gate passes with all four canonical product versions converged. CI preserves pnpm-before-setup-node cache ordering, adds Rust target caches, and runs and uploads V8 coverage for both tested TypeScript workspaces;
+- Linux packaged-artifact authority: **implemented; clean acceptance pending** — `pnpm release:package-qualify` requires a clean candidate, rebuilds the full gate, confines cleanup to the expected Tauri bundle subtree, audits AppImage version/hash/size/executable provenance, and runs a bounded read-only repository smoke from the packaged binary. A 2026-09-08 dirty diagnostic completed end-to-end with a real executable 107,833,848-byte AppImage and packaged smoke PASS, but diagnostic mode correctly records `releaseQualified=false`; a clean run is still required before artifact acceptance;
+- Tauri packaging configuration: **enabled** — `bundle.active=true`; the explicit tracked square icon and `NO_STRIP=1` linuxdeploy compatibility path are exercised by the diagnostic package lane. Network/cache/bootstrap failures remain classified separately as `PREREQUISITE_UNAVAILABLE` rather than being confused with product failures;
+- docs/tutorial/API reference: **partial but improved** — README now covers source prerequisites, desktop/frontend run commands, basic inspection/preview workflow, and the safety boundary; architecture/release docs describe the cross-layer runtime path. A consolidated public graph-elements/contracts API reference remains useful follow-up work;
 - diverse repository compatibility matrix: **Linux repository/runtime evidence qualified / packaged cross-platform partial** — `docs/COMPATIBILITY_MATRIX.md` records worktree, git-dir, linked-worktree, bare, HEAD-state, refs/tags/stash/remotes, diff-bound, watcher, refresh and scale evidence; packaged macOS/Windows execution remains unclaimed;
 - performance evidence: **qualified for synthetic CPU/layout/LOD/search gates plus native Linux i3/X11 projection evidence**, while browser metrics remain supplemental and no packaged cross-platform GPU/FPS claim is made;
-- version/changelog/release checklist: **qualified for 0.2.0 metadata** — product/core/Tauri/frontend/WASM versions converge on 0.2.0, the changelog has a dated 0.2.0 section, bundling is enabled, and `pnpm release:candidate` passes;
+- version/changelog/release checklist: **qualified for 0.2.0 metadata** — product/core/Tauri/frontend versions converge on 0.2.0, mismatches in any canonical source fail both verify and candidate metadata checks, the changelog has a dated 0.2.0 section, bundling is enabled, and `pnpm release:candidate` passes;
 - browser/WebAssembly/GitHub Pages: separate experimental provenance track; it must not be substituted for desktop/native release qualification;
-- local tag `v0.2.0` exists at the current baseline; no push/publish/deploy or new release action is implied without separate operator authorization.
+- local tag `v0.2.0` exists as the immutable local baseline; `docs/INITIAL_RELEASE_ROADMAP.md` recommends a new `v0.2.1` patch candidate for the first public packaged release rather than moving that tag. No push/publish/deploy or new release action is implied without separate operator authorization.
 
 ## Integration gates
 

@@ -2,10 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- Fail-closed Linux AppImage release qualification with adversarial artifact-auditor tests, exact product/version filename-token validation, hash/size/executable provenance, a bounded read-only release-binary/package smoke entrypoint, dirty-diagnostic separation, and machine-readable environment/build failure evidence.
+- Initial public-release roadmap that keeps the existing `v0.2.0` local baseline immutable, targets a new `v0.2.1` patch candidate for the first public package, and separates Linux artifact authority, native GUI evidence, cross-platform claims, and publication authorization.
+
 ### Changed
 
-- Release/readiness documentation now matches the tagged 0.2.0 metadata, enabled Tauri bundling, green candidate gate, and the remaining packaged-artifact/platform qualification boundaries.
-- CI now enforces the fast release-candidate metadata contract, adversarially tests its fail-closed version/changelog/bundling cases, and runs the root Biome lint gate explicitly.
+- Release/readiness documentation now matches the tagged 0.2.0 metadata, enabled Tauri bundling, green candidate gate, and reproduced Linux AppImage diagnostic; a clean package qualification remains the artifact-acceptance boundary rather than stale helper-download assumptions.
+- CI now preserves pnpm-before-Node-cache setup ordering, caches Rust targets, uploads TypeScript V8 coverage, enforces warning-fatal root Biome lint, and adversarially tests the fail-closed version/changelog/bundling and package-auditor contracts.
+- Release metadata verification now fails closed when any of the four canonical product version sources diverge in verify or candidate mode, while only candidate-specific bundling/changelog requirements remain warnings under verify.
+- AppImage qualification now confines bundle cleanup and evidence paths to repository-owned release locations, preserves build logs across packaging, and rejects non-executable AppImage artifacts.
 - Interaction coverage now locks `PickRegistry` key separation, duplicate rejection, immutable record snapshots, instance fallback, and stale-disposer safety.
 
 ## [0.2.0] - 2026-08-30
