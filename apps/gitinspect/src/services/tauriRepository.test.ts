@@ -214,6 +214,44 @@ describe("Tauri repository bridge", () => {
     ).rejects.toThrow(/identity mismatch/i);
   });
 
+  it("fails closed when a full refresh changes metadata without advancing revision", async () => {
+    const snapshot = createDemoSnapshot("/native/repo");
+    const replacementHead = snapshot.commits[1]!.oid;
+    const replacement: GitRepositorySnapshot = {
+      ...snapshot,
+      head: replacementHead,
+      refs: snapshot.refs.map((reference) =>
+        reference.name === snapshot.headRef ? { ...reference, targetOid: replacementHead } : reference,
+      ),
+    };
+    vi.stubGlobal("window", {
+      __TAURI__: {
+        core: {
+          invoke: vi.fn(async (command: string) => {
+            if (command === "refresh_repository_compact_delta") {
+              return {
+                status: "full",
+                session: {
+                  key: "repository:1",
+                  snapshot: compactSnapshot(replacement),
+                },
+              };
+            }
+            throw new Error(`unexpected command ${command}`);
+          }),
+        },
+        event: {
+          listen: vi.fn(),
+        },
+      },
+    });
+
+    const service = createTauriRepositoryService();
+    await expect(
+      service!.refreshRepository({ key: "repository:1", snapshot }),
+    ).rejects.toThrow(/full refresh.*revision/i);
+  });
+
   it("retries native watcher cleanup after a failed stop without reattaching the listener", async () => {
     const snapshot = createDemoSnapshot("/native/repo");
     const unlisten = vi.fn();

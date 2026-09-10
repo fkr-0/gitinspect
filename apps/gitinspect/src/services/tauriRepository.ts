@@ -93,6 +93,9 @@ export function createTauriRepositoryService(): RepositoryService | undefined {
       ) {
         throw new Error("Native full refresh changed the repository path identity");
       }
+      if (refreshed.snapshot.revision === session.snapshot.revision) {
+        throw new Error("Native full refresh must advance the repository revision");
+      }
       return refreshed;
     },
 
