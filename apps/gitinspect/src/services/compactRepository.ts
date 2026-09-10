@@ -120,6 +120,45 @@ export function decodeCompactCommitBatch(batch: CompactGitCommitBatch): readonly
   return batch.commits.map((commit) => decodeCommit(batch.strings, commit));
 }
 
+function validateUniqueCommitIdentities(
+  context: string,
+  commits: readonly GitCommitRecord[],
+): void {
+  const seen = new Set<string>();
+  for (const commit of commits) {
+    if (seen.has(commit.oid)) {
+      throw new Error(`${context} duplicates commit identity: ${commit.oid}`);
+    }
+    seen.add(commit.oid);
+  }
+}
+
+function validateRefIdentities(
+  context: string,
+  refs: readonly GitRefRecord[],
+  head: string | undefined,
+  headRef: string | undefined,
+): void {
+  const seen = new Set<string>();
+  for (const reference of refs) {
+    if (seen.has(reference.name)) {
+      throw new Error(`${context} duplicates ref identity: ${reference.name}`);
+    }
+    seen.add(reference.name);
+  }
+
+  // Attached repositories have one authoritative symbolic HEAD referent. An
+  // unborn branch may legitimately have headRef without a resolved head, while
+  // detached HEAD legitimately has head without headRef, so only validate the
+  // target pairing when both sides are resolved.
+  if (head !== undefined && headRef !== undefined) {
+    const authoritativeRef = refs.find((reference) => reference.name === headRef);
+    if (!authoritativeRef || authoritativeRef.targetOid !== head) {
+      throw new Error(`${context} HEAD ref metadata is inconsistent`);
+    }
+  }
+}
+
 export function applyCompactRepositoryAppendDelta(
   session: RepositorySession,
   delta: CompactRepositoryAppendDelta,
@@ -168,10 +207,7 @@ export function applyCompactRepositoryAppendDelta(
       throw new Error("Compact repository delta is not a linear append from the base HEAD");
     }
   }
-  const headRef = delta.refs.find((reference) => reference.name === delta.headRef);
-  if (!headRef || headRef.targetOid !== delta.head) {
-    throw new Error("Compact repository delta HEAD ref metadata is inconsistent");
-  }
+  validateRefIdentities("Compact repository delta", delta.refs, delta.head, delta.headRef);
 
   const retained = base.commits.slice(0, base.commits.length - delta.dropCommitCount);
   const retainedOids = new Set(retained.map((commit) => commit.oid));
@@ -202,6 +238,9 @@ export function decodeCompactRepositorySnapshot(
   if (compact.schemaVersion !== 1) {
     throw new Error(`Unsupported compact repository schema version: ${compact.schemaVersion}`);
   }
+  const commits = compact.commits.map((commit) => decodeCommit(compact.strings, commit));
+  validateUniqueCommitIdentities("Compact repository snapshot", commits);
+  validateRefIdentities("Compact repository snapshot", compact.refs, compact.head, compact.headRef);
   return {
     schemaVersion: 1,
     repositoryPath: compact.repositoryPath,
@@ -209,7 +248,7 @@ export function decodeCompactRepositorySnapshot(
     ...(compact.head === undefined ? {} : { head: compact.head }),
     ...(compact.headRef === undefined ? {} : { headRef: compact.headRef }),
     revision: compact.revision,
-    commits: compact.commits.map((commit) => decodeCommit(compact.strings, commit)),
+    commits,
     refs: compact.refs,
     remotes: compact.remotes,
     hooks: compact.hooks,

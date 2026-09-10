@@ -170,4 +170,34 @@ describe("compact repository transport", () => {
       /string index/i,
     );
   });
+
+  it("fails closed on duplicate commit identities in a full compact snapshot", () => {
+    const malformed = fixture();
+    expect(() =>
+      decodeCompactRepositorySnapshot({
+        ...malformed,
+        commits: [malformed.commits[0]!, malformed.commits[0]!],
+      }),
+    ).toThrow(/duplicates commit/i);
+  });
+
+  it("fails closed on duplicate or contradictory ref identity in compact metadata", () => {
+    const malformed = fixture();
+    expect(() =>
+      decodeCompactRepositorySnapshot({
+        ...malformed,
+        refs: [
+          ...malformed.refs,
+          { name: "refs/heads/main", targetOid: "parent", kind: "local-branch" },
+        ],
+      }),
+    ).toThrow(/duplicates ref/i);
+
+    expect(() =>
+      decodeCompactRepositorySnapshot({
+        ...malformed,
+        refs: [{ ...malformed.refs[0]!, targetOid: "parent" }],
+      }),
+    ).toThrow(/HEAD ref metadata is inconsistent/i);
+  });
 });
