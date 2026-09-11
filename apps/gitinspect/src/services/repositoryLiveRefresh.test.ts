@@ -99,6 +99,44 @@ describe("RepositoryLiveRefreshCoordinator", () => {
     expect(refreshRepository).toHaveBeenCalledTimes(2);
   });
 
+  it("retains an old-authority watcher event that arrives during a changed refresh", async () => {
+    const firstSession = session("rev-1");
+    const secondSession = session("rev-2");
+    const thirdSession = session("rev-3");
+    const first = deferred<RepositorySession>();
+    const second = deferred<RepositorySession>();
+    const refreshRepository = vi
+      .fn()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+    const onRefreshed = vi.fn();
+    const coordinator = new RepositoryLiveRefreshCoordinator({ refreshRepository }, firstSession, {
+      onRefreshed,
+      onError: vi.fn(),
+    });
+
+    coordinator.request(change("rev-1"));
+    expect(refreshRepository).toHaveBeenCalledTimes(1);
+
+    // The native watcher reads the repository authority revision at event time.
+    // Until the in-flight refresh publishes rev-2, a second real filesystem
+    // change is therefore still stamped with rev-1 even when it happened after
+    // the refresh sampled the repository. That old-authority event must retain
+    // one bounded follow-up or the second change can be missed indefinitely.
+    expect(coordinator.request(change("rev-1"))).toBe(true);
+    first.resolve(secondSession);
+    await flushPromises();
+
+    expect(refreshRepository).toHaveBeenCalledTimes(2);
+    expect(refreshRepository).toHaveBeenNthCalledWith(2, secondSession);
+    second.resolve(thirdSession);
+    await flushPromises();
+    expect(onRefreshed.mock.calls.map(([value]) => value.snapshot.revision)).toEqual([
+      "rev-2",
+      "rev-3",
+    ]);
+  });
+
   it("retries after an unchanged refresh when an in-flight event requested a follow-up", async () => {
     const current = session("rev-1");
     const changed = session("rev-2");

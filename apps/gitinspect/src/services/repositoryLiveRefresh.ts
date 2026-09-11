@@ -34,11 +34,12 @@ export class RepositoryLiveRefreshCoordinator {
   request(change: RepositoryChange): boolean {
     if (!this.active || change.repositoryId !== this.refreshSession.key) return false;
 
-    // While a refresh is in flight the native authority may already have moved
-    // beyond the result revision. Defer revision validation until the refresh
-    // resolves: only an event tied to the request revision (when the refresh is
-    // unchanged/failed) or the returned revision (when it changed) can justify
-    // a follow-up. Arbitrary stale/future revisions must not bypass the guard.
+    // While a refresh is in flight the native watcher may still observe the
+    // request revision until the authority publishes the refresh result, or it
+    // may observe the returned revision after publication. Defer provenance
+    // validation until the refresh resolves so either boundary revision can
+    // justify one bounded follow-up. Arbitrary stale/future revisions must not
+    // bypass the guard.
     if (this.refreshing) {
       this.inFlightPreviousRevisions.add(change.previousRevision);
       return true;
@@ -99,9 +100,9 @@ export class RepositoryLiveRefreshCoordinator {
     const requestRevision = requestSession.snapshot.revision;
     const refreshedRevision = refreshed.snapshot.revision;
     const changed = refreshedRevision !== requestRevision;
-    const followUpRequested = this.inFlightPreviousRevisions.has(
-      changed ? refreshedRevision : requestRevision,
-    );
+    const followUpRequested =
+      this.inFlightPreviousRevisions.has(requestRevision) ||
+      this.inFlightPreviousRevisions.has(refreshedRevision);
     if (changed) this.refreshSession = refreshed;
     this.finishRefresh(followUpRequested);
 
