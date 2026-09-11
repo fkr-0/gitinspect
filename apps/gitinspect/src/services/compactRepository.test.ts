@@ -181,6 +181,28 @@ describe("compact repository transport", () => {
     ).toThrow(/duplicates commit/i);
   });
 
+  it("fails closed on duplicate remote or hook identity in compact metadata", () => {
+    const malformed = fixture();
+    const remote = {
+      name: "origin",
+      fetchUrls: ["ssh://example.invalid/repo.git"],
+      pushUrls: ["ssh://example.invalid/repo.git"],
+    };
+
+    expect(() =>
+      decodeCompactRepositorySnapshot({
+        ...malformed,
+        remotes: [remote, remote],
+      }),
+    ).toThrow(/duplicates remote/i);
+    expect(() =>
+      decodeCompactRepositorySnapshot({
+        ...malformed,
+        hooks: ["pre-commit", "pre-commit"],
+      }),
+    ).toThrow(/duplicates hook/i);
+  });
+
   it("fails closed on duplicate or contradictory ref identity in compact metadata", () => {
     const malformed = fixture();
     expect(() =>

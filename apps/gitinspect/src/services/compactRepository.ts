@@ -159,6 +159,28 @@ function validateRefIdentities(
   }
 }
 
+function validateMetadataIdentities(
+  context: string,
+  remotes: readonly GitRemoteRecord[],
+  hooks: readonly string[],
+): void {
+  const remoteNames = new Set<string>();
+  for (const remote of remotes) {
+    if (remoteNames.has(remote.name)) {
+      throw new Error(`${context} duplicates remote identity: ${remote.name}`);
+    }
+    remoteNames.add(remote.name);
+  }
+
+  const hookNames = new Set<string>();
+  for (const hook of hooks) {
+    if (hookNames.has(hook)) {
+      throw new Error(`${context} duplicates hook identity: ${hook}`);
+    }
+    hookNames.add(hook);
+  }
+}
+
 export function applyCompactRepositoryAppendDelta(
   session: RepositorySession,
   delta: CompactRepositoryAppendDelta,
@@ -208,6 +230,7 @@ export function applyCompactRepositoryAppendDelta(
     }
   }
   validateRefIdentities("Compact repository delta", delta.refs, delta.head, delta.headRef);
+  validateMetadataIdentities("Compact repository delta", delta.remotes, delta.hooks);
 
   const retained = base.commits.slice(0, base.commits.length - delta.dropCommitCount);
   const retainedOids = new Set(retained.map((commit) => commit.oid));
@@ -241,6 +264,7 @@ export function decodeCompactRepositorySnapshot(
   const commits = compact.commits.map((commit) => decodeCommit(compact.strings, commit));
   validateUniqueCommitIdentities("Compact repository snapshot", commits);
   validateRefIdentities("Compact repository snapshot", compact.refs, compact.head, compact.headRef);
+  validateMetadataIdentities("Compact repository snapshot", compact.remotes, compact.hooks);
   return {
     schemaVersion: 1,
     repositoryPath: compact.repositoryPath,
