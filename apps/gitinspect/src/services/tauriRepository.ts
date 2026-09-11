@@ -14,6 +14,7 @@ import {
   type RepositorySession,
   type RepositoryWatchStop,
 } from "./repository";
+import { verifyRepositoryRevision } from "./repositoryRevision";
 
 interface TauriEvent<T> {
   readonly event: string;
@@ -56,10 +57,12 @@ export function createTauriRepositoryService(): RepositoryService | undefined {
       return tauri.core.invoke<string | undefined>("choose_repository_path", { selection });
     },
 
-    openRepository(path: string): Promise<RepositorySession> {
-      return tauri.core
-        .invoke<CompactRepositorySession>("open_repository_compact", { path })
-        .then(decodeCompactRepositorySession);
+    async openRepository(path: string): Promise<RepositorySession> {
+      const session = decodeCompactRepositorySession(
+        await tauri.core.invoke<CompactRepositorySession>("open_repository_compact", { path }),
+      );
+      await verifyRepositoryRevision(session.snapshot);
+      return session;
     },
 
     async refreshRepository(session: RepositorySession): Promise<RepositorySession> {
@@ -79,7 +82,9 @@ export function createTauriRepositoryService(): RepositoryService | undefined {
         return session;
       }
       if (result.status === "delta") {
-        return applyCompactRepositoryAppendDelta(session, result.delta);
+        const refreshed = applyCompactRepositoryAppendDelta(session, result.delta);
+        await verifyRepositoryRevision(refreshed.snapshot);
+        return refreshed;
       }
       const refreshed = decodeCompactRepositorySession(result.session);
       if (refreshed.key !== session.key) {
@@ -96,6 +101,7 @@ export function createTauriRepositoryService(): RepositoryService | undefined {
       if (refreshed.snapshot.revision === session.snapshot.revision) {
         throw new Error("Native full refresh must advance the repository revision");
       }
+      await verifyRepositoryRevision(refreshed.snapshot);
       return refreshed;
     },
 

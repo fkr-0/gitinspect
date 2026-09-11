@@ -3,7 +3,13 @@ import type { GitRepositorySnapshot } from "@gitinspect/contracts";
 
 import type { CompactGitCommitRecord, CompactGitRepositorySnapshot } from "./compactRepository";
 import { createDemoSnapshot } from "./repository";
+import { computeRepositoryRevision } from "./repositoryRevision";
 import { createTauriRepositoryService } from "./tauriRepository";
+
+async function nativeSnapshot(path: string): Promise<GitRepositorySnapshot> {
+  const snapshot = createDemoSnapshot(path);
+  return { ...snapshot, revision: await computeRepositoryRevision(snapshot) };
+}
 
 function compactSnapshot(snapshot: GitRepositorySnapshot): CompactGitRepositorySnapshot {
   const strings: string[] = [];
@@ -55,7 +61,7 @@ afterEach(() => {
 
 describe("Tauri repository bridge", () => {
   it("maps repository operations onto the narrow native command/event contract", async () => {
-    const snapshot = createDemoSnapshot("/native/repo");
+    const snapshot = await nativeSnapshot("/native/repo");
     const compact = { key: "repository:1", snapshot: compactSnapshot(snapshot) };
     const invocations: Array<{ command: string; args: unknown }> = [];
     let eventHandler:
@@ -184,8 +190,8 @@ describe("Tauri repository bridge", () => {
   });
 
   it("fails closed when a full refresh replaces the repository identity", async () => {
-    const snapshot = createDemoSnapshot("/native/repo");
-    const replacement = createDemoSnapshot("/native/other");
+    const snapshot = await nativeSnapshot("/native/repo");
+    const replacement = await nativeSnapshot("/native/other");
     vi.stubGlobal("window", {
       __TAURI__: {
         core: {
@@ -215,7 +221,7 @@ describe("Tauri repository bridge", () => {
   });
 
   it("fails closed when a full refresh changes metadata without advancing revision", async () => {
-    const snapshot = createDemoSnapshot("/native/repo");
+    const snapshot = await nativeSnapshot("/native/repo");
     const replacementHead = snapshot.commits[1]!.oid;
     const replacement: GitRepositorySnapshot = {
       ...snapshot,
@@ -250,6 +256,40 @@ describe("Tauri repository bridge", () => {
     await expect(
       service!.refreshRepository({ key: "repository:1", snapshot }),
     ).rejects.toThrow(/full refresh.*revision/i);
+  });
+
+  it("fails closed when a full refresh carries a forged advanced revision", async () => {
+    const snapshot = await nativeSnapshot("/native/repo");
+    const replacementHead = snapshot.commits[1]!.oid;
+    const replacement: GitRepositorySnapshot = {
+      ...snapshot,
+      head: replacementHead,
+      revision: `sha256:${"0".repeat(64)}`,
+      refs: snapshot.refs.map((reference) =>
+        reference.name === snapshot.headRef ? { ...reference, targetOid: replacementHead } : reference,
+      ),
+    };
+    vi.stubGlobal("window", {
+      __TAURI__: {
+        core: {
+          invoke: vi.fn(async (command: string) => {
+            if (command === "refresh_repository_compact_delta") {
+              return {
+                status: "full",
+                session: { key: "repository:1", snapshot: compactSnapshot(replacement) },
+              };
+            }
+            throw new Error(`unexpected command ${command}`);
+          }),
+        },
+        event: { listen: vi.fn() },
+      },
+    });
+
+    const service = createTauriRepositoryService();
+    await expect(service!.refreshRepository({ key: "repository:1", snapshot })).rejects.toThrow(
+      /fingerprint mismatch/i,
+    );
   });
 
   it("retries native watcher cleanup after a failed stop without reattaching the listener", async () => {
