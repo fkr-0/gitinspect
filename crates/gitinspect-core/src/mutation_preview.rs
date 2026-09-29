@@ -1368,7 +1368,7 @@ impl MutationSandboxManager {
             )));
         }
         let mut paths = Vec::new();
-        for pair in parts.chunks_exact(2) {
+        for pair in parts.as_chunks::<2>().0 {
             let status = String::from_utf8_lossy(pair[0]);
             if status != "A" && status != "M" {
                 return Ok(Err(split_failure(
