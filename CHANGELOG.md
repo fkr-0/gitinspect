@@ -6,6 +6,8 @@
 
 - Fail-closed Linux AppImage release qualification with adversarial artifact-auditor tests, exact product/version filename-token validation, hash/size/executable provenance, a bounded read-only release-binary/package smoke entrypoint, dirty-diagnostic separation, and machine-readable environment/build failure evidence.
 - Initial public-release roadmap that keeps the existing `v0.2.0` local baseline immutable, targets a new `v0.2.1` patch candidate for the first public package, and separates Linux artifact authority, native GUI evidence, cross-platform claims, and publication authorization.
+- Reusable API reference for the private `@gitinspect/contracts` and `@gitinspect/graph-elements` root barrels, with explicit stability, publication, and mutation-authority boundaries.
+- Machine-readable 0.2.x closeout evidence mapping stale release/scale-cache obligations to landed commits, current verification, historical artifact/runtime receipts, and remaining exact-candidate gates.
 
 ### Changed
 
@@ -15,6 +17,7 @@
 - Release metadata verification now fails closed when any of the four canonical product version sources diverge in verify or candidate mode, while only candidate-specific bundling/changelog requirements remain warnings under verify; the final Git whitespace gate now covers staged and unstaged changes and has a staged-whitespace regression fixture.
 - AppImage qualification now confines bundle cleanup and evidence paths to repository-owned release locations, preserves build logs across packaging, rejects non-executable AppImage artifacts, retains prior qualification receipts across interrupted attempts, stores new run sidecars in unique Git-metadata evidence directories, and exits fail-closed on `INT`/`TERM` instead of continuing after cleanup.
 - Interaction coverage now locks `PickRegistry` key separation, duplicate rejection, immutable record snapshots, instance fallback, and stale-disposer safety.
+- Release closeout reconciles `bridge.yml` agent tasks to one concrete future exact-candidate Linux native/AppImage qualification obligation instead of continuing to advertise source, documentation, and historical scale/cache work already evidenced complete.
 
 ## [0.2.0] - 2026-08-30
 

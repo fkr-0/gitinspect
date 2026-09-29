@@ -25,6 +25,8 @@ docs/                            specification, architecture, implementation pla
 orchestration/prompts/           autonomous worker prompts
 ```
 
+For the reusable in-repository TypeScript surface, see `docs/API_REFERENCE.md`. The contracts and graph-elements packages remain private workspace packages; this reference does not claim independent npm publication or standalone semantic-version support.
+
 ## Run from source
 
 CI uses Node.js 24, pnpm 11.3.0, and stable Rust with `rustfmt` and `clippy`. Install the platform prerequisites required by Tauri as well; on Debian/Ubuntu the CI lane installs `libwebkit2gtk-4.1-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, and `patchelf` (plus the compiler/system utilities listed in `.github/workflows/ci.yml`).
