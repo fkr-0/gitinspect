@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## [0.2.2] - 2026-09-29
+
+### Fixed
+
+- Added the Windows `icons/icon.ico` application resource required by Tauri's Windows resource generator. The immutable `v0.2.1` tag reached green candidate verification plus Linux and both macOS bundle jobs, but its Windows bundle failed solely because this resource was absent, so the draft `v0.2.1` GitHub Release was never published.
+- Requalified the patch through the complete tagged release matrix before publication rather than weakening or skipping the Windows lane.
+
+### Release status
+
+- Exact-tag Linux AppImage qualification from `v0.2.1` remains historical evidence only; Linux X11/i3 native GPU/projection qualification remains a separate environment-sensitive gate and is not inferred from cross-platform packaging CI.
+- GitHub Pages is configured to deploy through GitHub Actions for the public repository; Pages/WASM publication remains separate from desktop package runtime qualification.
+
 ## [0.2.1] - 2026-09-29
 
 ### Added
