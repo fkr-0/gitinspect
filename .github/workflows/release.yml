@@ -1,0 +1,196 @@
+name: Tagged Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tagged-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify release candidate
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout tagged revision
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Linux Tauri dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            xdg-utils
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Require tag/version agreement
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./apps/gitinspect/package.json').version")"
+          test "${GITHUB_REF_NAME}" = "v${version}" || {
+            echo "tag ${GITHUB_REF_NAME} does not match app version v${version}" >&2
+            exit 1
+          }
+
+      - name: Run full candidate gate
+        run: pnpm release:candidate
+
+  prepare-release:
+    name: Prepare draft GitHub Release
+    needs: verify
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Create or reuse draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            state="$(gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq '.isDraft')"
+            test "${state}" = "true" || {
+              echo "release ${GITHUB_REF_NAME} already exists and is not a draft" >&2
+              exit 1
+            }
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --verify-tag \
+              --draft \
+              --generate-notes \
+              --title "GitInspect ${GITHUB_REF_NAME}"
+          fi
+
+  build:
+    name: Build ${{ matrix.label }}
+    needs: prepare-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux x86_64
+            platform: ubuntu-22.04
+            args: ""
+            rust_targets: ""
+          - label: Windows x86_64
+            platform: windows-latest
+            args: ""
+            rust_targets: ""
+          - label: macOS arm64
+            platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+            rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+          - label: macOS x86_64
+            platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+            rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout tagged revision
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Install Linux Tauri dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            xdg-utils
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and upload Tauri bundles
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          projectPath: apps/gitinspect
+          tagName: ${{ github.ref_name }}
+          releaseName: GitInspect ${{ github.ref_name }}
+          releaseDraft: true
+          prerelease: false
+          retryAttempts: 2
+          args: ${{ matrix.args }}
+          releaseAssetNamePattern: gitinspect-[version]-[platform]-[arch][setup][ext]
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: gitinspect-[version]-[platform]-[arch]-[bundle]
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release edit "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --draft=false \
+            --latest
+          url="$(gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json url --jq '.url')"
+          printf '### Published %s\n\n%s\n' "${GITHUB_REF_NAME}" "${url}" >> "${GITHUB_STEP_SUMMARY}"
