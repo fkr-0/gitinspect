@@ -84,6 +84,22 @@ describe("Tauri repository bridge", () => {
                   status: "unchanged",
                   revision: snapshot.revision,
                 };
+              case "run_repository_plugins":
+                return {
+                  schemaVersion: 1,
+                  apiVersion: 1,
+                  repositoryRevision: snapshot.revision,
+                  plugins: [],
+                  summary: {
+                    enabledPlugins: 0,
+                    disabledPlugins: 0,
+                    infoFindings: 0,
+                    warningFindings: 0,
+                    errorFindings: 0,
+                  },
+                  diagnostics: [],
+                  truncated: false,
+                };
               case "get_commit_diff":
                 return {
                   oid: snapshot.commits[0]!.oid,
@@ -127,6 +143,8 @@ describe("Tauri repository bridge", () => {
     const refreshed = await service!.refreshRepository(opened);
     expect(refreshed).toBe(opened);
     expect(opened.snapshot.commits.every((commit) => commit.files.length === 0)).toBe(true);
+    const pluginReport = await service!.runPlugins!(opened);
+    expect(pluginReport.repositoryRevision).toBe(snapshot.revision);
     const diff = await service!.getCommitDiff(opened, snapshot.commits[0]!.oid);
     expect(diff.oid).toBe(snapshot.commits[0]!.oid);
     const detail = await service!.getCommitFileDetail(
@@ -165,6 +183,14 @@ describe("Tauri repository bridge", () => {
     expect(invocations).toContainEqual({
       command: "open_repository_compact",
       args: { path: "/native/repo" },
+    });
+    expect(invocations).toContainEqual({
+      command: "run_repository_plugins",
+      args: {
+        repositoryId: opened.key,
+        expectedRevision: snapshot.revision,
+        options: null,
+      },
     });
     expect(invocations).toContainEqual({
       command: "get_commit_diff",

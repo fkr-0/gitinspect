@@ -1,0 +1,15 @@
+# GitInspect plugin configuration example.
+# Copy to .gitinspect.yml at a repository root.
+version: 1
+plugins:
+  security-audit:
+    enabled: true
+  license-check:
+    enabled: true
+    require-license-file: true
+  dependency-freshness:
+    enabled: true
+    max-age-days: 180
+  repository-policy:
+    enabled: true
+    manifest: .gitinspect/plugins/repository-policy.json

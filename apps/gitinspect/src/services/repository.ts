@@ -2,6 +2,7 @@ import type {
   GitCommitDiff,
   GitCommitFileDetail,
   GitCommitRecord,
+  GitPluginReport,
   GitRepositorySnapshot,
 } from "@gitinspect/contracts";
 
@@ -37,6 +38,7 @@ export interface RepositoryService {
     oid: string,
     path: string,
   ): Promise<GitCommitFileDetail>;
+  runPlugins?(session: RepositorySession): Promise<GitPluginReport>;
   watchRepository(
     session: RepositorySession,
     onChange: (change: RepositoryChange) => void,
@@ -246,6 +248,7 @@ export interface NativeRepositoryBridge {
     oid: string,
     path: string,
   ): Promise<GitCommitFileDetail>;
+  runPlugins(session: RepositorySession): Promise<GitPluginReport>;
   watchRepository(
     session: RepositorySession,
     onChange: (change: RepositoryChange) => void,
@@ -279,6 +282,10 @@ export class NativeRepositoryService implements RepositoryService {
     path: string,
   ): Promise<GitCommitFileDetail> {
     return this.bridge.getCommitFileDetail(session, oid, path);
+  }
+
+  runPlugins(session: RepositorySession): Promise<GitPluginReport> {
+    return this.bridge.runPlugins(session);
   }
 
   watchRepository(

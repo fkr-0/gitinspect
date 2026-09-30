@@ -210,6 +210,52 @@ export interface GitCommitFileDetail {
   readonly truncated: boolean;
 }
 
+export type GitPluginSeverity = "info" | "warning" | "error";
+export type GitPluginStatus = "passed" | "warning" | "failed" | "disabled";
+export type GitPluginSource = "builtin" | "manifest";
+
+export interface GitPluginFinding {
+  readonly ruleId: string;
+  readonly severity: GitPluginSeverity;
+  readonly message: string;
+  readonly path?: string;
+  readonly commitOid?: string;
+}
+
+export interface GitPluginMetric {
+  readonly name: string;
+  readonly value: number;
+}
+
+export interface GitPluginResult {
+  readonly id: string;
+  readonly name: string;
+  readonly source: GitPluginSource;
+  readonly status: GitPluginStatus;
+  readonly findings: readonly GitPluginFinding[];
+  readonly metrics: readonly GitPluginMetric[];
+  readonly truncated: boolean;
+}
+
+export interface GitPluginReportSummary {
+  readonly enabledPlugins: number;
+  readonly disabledPlugins: number;
+  readonly infoFindings: number;
+  readonly warningFindings: number;
+  readonly errorFindings: number;
+}
+
+export interface GitPluginReport {
+  readonly schemaVersion: 1;
+  readonly apiVersion: 1;
+  readonly repositoryRevision: string;
+  readonly configPath?: string;
+  readonly plugins: readonly GitPluginResult[];
+  readonly summary: GitPluginReportSummary;
+  readonly diagnostics: readonly string[];
+  readonly truncated: boolean;
+}
+
 export type MutationKind =
   | "branch-create"
   | "branch-delete"

@@ -63,6 +63,37 @@ describe("inspection export", () => {
           },
         ],
       },
+      pluginReport: {
+        schemaVersion: 1,
+        apiVersion: 1,
+        repositoryRevision: "rev-8",
+        plugins: [
+          {
+            id: "license-check",
+            name: "License check",
+            source: "builtin",
+            status: "warning",
+            findings: [
+              {
+                ruleId: "license-file-required",
+                severity: "warning",
+                message: "No LICENSE file found",
+              },
+            ],
+            metrics: [{ name: "licenseFiles", value: 0 }],
+            truncated: false,
+          },
+        ],
+        summary: {
+          enabledPlugins: 1,
+          disabledPlugins: 0,
+          infoFindings: 0,
+          warningFindings: 1,
+          errorFindings: 0,
+        },
+        diagnostics: [],
+        truncated: false,
+      },
       fileDetail: {
         oid: "abc",
         path: "src/main.ts",
@@ -85,6 +116,7 @@ describe("inspection export", () => {
     expect(serialized.endsWith("\n")).toBe(true);
     const parsed = JSON.parse(serialized);
     expect(parsed.commitDiff.files[0].path).toBe("src/main.ts");
+    expect(parsed.pluginReport.plugins[0].id).toBe("license-check");
     expect(parsed.fileDetail.hunks[0].lines[0]).toEqual({
       kind: "addition",
       content: "hello\n",

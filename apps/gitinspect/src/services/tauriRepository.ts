@@ -1,4 +1,4 @@
-import type { GitCommitDiff, GitCommitFileDetail } from "@gitinspect/contracts";
+import type { GitCommitDiff, GitCommitFileDetail, GitPluginReport } from "@gitinspect/contracts";
 
 import {
   applyCompactRepositoryAppendDelta,
@@ -109,6 +109,14 @@ export function createTauriRepositoryService(): RepositoryService | undefined {
       return tauri.core.invoke<GitCommitDiff>("get_commit_diff", {
         repositoryId: session.key,
         oid,
+        options: null,
+      });
+    },
+
+    runPlugins(session: RepositorySession): Promise<GitPluginReport> {
+      return tauri.core.invoke<GitPluginReport>("run_repository_plugins", {
+        repositoryId: session.key,
+        expectedRevision: session.snapshot.revision,
         options: null,
       });
     },

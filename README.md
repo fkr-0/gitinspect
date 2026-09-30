@@ -25,7 +25,7 @@ docs/                            specification, architecture, implementation pla
 orchestration/prompts/           autonomous worker prompts
 ```
 
-For the reusable in-repository TypeScript surface, see `docs/API_REFERENCE.md`. The contracts and graph-elements packages remain private workspace packages; this reference does not claim independent npm publication or standalone semantic-version support.
+For the reusable in-repository TypeScript surface, see `docs/API_REFERENCE.md`. For sandboxed repository-analysis extensions, see `docs/PLUGINS.md` and `.gitinspect.yml.example`; a copyable declarative manifest lives at `examples/plugins/repository-policy.json`. The contracts and graph-elements packages remain private workspace packages; this reference does not claim independent npm publication or standalone semantic-version support.
 
 ## Run from source
 
@@ -73,6 +73,8 @@ Linux i3/X11 native projection qualification and AppImage qualification are inte
 ## Safety model
 
 - Loading and inspection are read-only.
+- Plugins are declarative JSON rules evaluated by the bounded Rust host; plugin manifests cannot execute shell/native/JavaScript/WebAssembly code.
+- Plugin manifests are confined to `.gitinspect/plugins/`, and plugin/config input cannot widen host scan/report limits.
 - Mutation requests build an explicit transaction and preview first.
 - The default mutation target is a disposable repository copy/worktree.
 - Original-repository apply is not exposed; confirming a preview never grants original-repository mutation authority.

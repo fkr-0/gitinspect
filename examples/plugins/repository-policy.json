@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "repository-policy",
+  "name": "Repository policy",
+  "description": "Example sandboxed GitInspect plugin with commit, file, and diff metrics.",
+  "rules": [
+    {
+      "id": "todo-commit",
+      "source": "commit",
+      "field": "message",
+      "operator": "contains",
+      "value": "TODO",
+      "severity": "warning",
+      "message": "Commit {commit} still contains TODO in its message",
+      "metric": "todoCommits"
+    },
+    {
+      "id": "large-file",
+      "source": "file",
+      "field": "sizeBytes",
+      "operator": "gt",
+      "value": 1048576,
+      "severity": "info",
+      "message": "Large working-tree file: {path}",
+      "metric": "largeFiles"
+    },
+    {
+      "id": "dependency-diff",
+      "source": "diff",
+      "field": "path",
+      "operator": "suffix",
+      "value": "Cargo.toml",
+      "severity": "info",
+      "message": "Dependency manifest touched by {commit}: {path}",
+      "metric": "cargoManifestChanges"
+    }
+  ]
+}

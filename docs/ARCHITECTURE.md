@@ -81,6 +81,7 @@ Rust library (and optionally test CLI) responsible for:
 - commit metadata and diff/stat extraction;
 - snapshot revision fingerprinting;
 - file watching and event coalescing;
+- sandboxed declarative plugin discovery/evaluation plus bounded repository/file/diff reports;
 - transaction validation and repository-local copy/sandbox preview support;
 - fail-closed original-apply safety primitives/evidence, without exposing an original-repository executor.
 
@@ -111,6 +112,7 @@ refresh_repository_compact(repository_id, expected_revision?) -> unchanged | com
 refresh_repository_compact_delta(repository_id, expected_revision?) -> unchanged | append delta | full compact session
 get_commit_diff(repository_id, oid, options?) -> GitCommitDiff
 get_commit_file_detail(repository_id, oid, path, options?) -> GitCommitFileDetail
+run_repository_plugins(repository_id, expected_revision?, options?) -> GitPluginReport
 start_repository_watch(repository_id) -> WatchSession { watchId }
 stop_repository_watch(watch_id) -> void
 ```
@@ -217,6 +219,8 @@ No LOD operation changes domain identity.
 ## 10. Security and mutation safeguards
 
 - Frontend never receives a generic shell command endpoint.
+- Plugin extension points are data-only JSON manifests: no native library, shell, JavaScript, or WebAssembly plugin execution is exposed.
+- Plugin manifests canonicalize beneath `.gitinspect/plugins/`, symlinks are rejected, and scan/report limits are host-owned.
 - Paths are canonicalized and repository handles are server-side opaque IDs after opening.
 - Preview creation validates that the live repository revision matches the transaction base, and stale source state is rejected before sandbox work.
 - Default/only mutation execution target in the current product is a disposable copy located under gitinspect-managed repository-local storage, never bare `/tmp`.

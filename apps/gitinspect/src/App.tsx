@@ -1,4 +1,4 @@
-import type { GitCommitDiff, GitCommitFileDetail } from "@gitinspect/contracts";
+import type { GitCommitDiff, GitCommitFileDetail, GitPluginReport } from "@gitinspect/contracts";
 import {
   type CameraState,
   type ChildWorldResolver,
@@ -73,6 +73,12 @@ type CommitDiffState =
   | { readonly status: "loading"; readonly oid: string }
   | { readonly status: "ready"; readonly oid: string; readonly diff: GitCommitDiff }
   | { readonly status: "error"; readonly oid: string; readonly message: string };
+
+type PluginReportState =
+  | { readonly status: "idle" }
+  | { readonly status: "loading"; readonly revision: string }
+  | { readonly status: "ready"; readonly revision: string; readonly report: GitPluginReport }
+  | { readonly status: "error"; readonly revision: string; readonly message: string };
 
 type FileDetailState =
   | { readonly status: "idle" }
@@ -646,6 +652,7 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
   const [state, dispatch] = useReducer(studioReducer, initialStudioState);
   const [commitDiffState, setCommitDiffState] = useState<CommitDiffState>({ status: "idle" });
   const [fileDetailState, setFileDetailState] = useState<FileDetailState>({ status: "idle" });
+  const [pluginReportState, setPluginReportState] = useState<PluginReportState>({ status: "idle" });
   const [indexedSearchResults, setIndexedSearchResults] = useState<ViewportSearchResults>({
     query: "",
     filterKey: "",
@@ -1091,12 +1098,17 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
       node: activeInspectionNode,
       ...(commitDiff === undefined ? {} : { commitDiff }),
       ...(fileDetail === undefined ? {} : { fileDetail }),
+      ...(pluginReportState.status === "ready" &&
+      pluginReportState.revision === state.session.snapshot.revision
+        ? { pluginReport: pluginReportState.report }
+        : {}),
     });
   }, [
     activeInspectionNode,
     commitDiffState,
     fileDetailState,
     navigationDepth,
+    pluginReportState,
     selectedChangedFilePath,
     selectedCommitOid,
     state.selectedElementId,
@@ -1183,6 +1195,42 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
       if (stopWatch) void stopWatch();
     };
   }, [repositorySessionKey, service]);
+
+  useEffect(() => {
+    const session = state.session;
+    if (!session || !service.runPlugins) {
+      setPluginReportState({ status: "idle" });
+      return;
+    }
+    let active = true;
+    const revision = session.snapshot.revision;
+    setPluginReportState({ status: "loading", revision });
+    void service
+      .runPlugins(session)
+      .then((report) => {
+        if (!active) return;
+        if (report.repositoryRevision !== revision) {
+          setPluginReportState({
+            status: "error",
+            revision,
+            message: `Plugin report revision mismatch: expected ${revision}, got ${report.repositoryRevision}`,
+          });
+          return;
+        }
+        setPluginReportState({ status: "ready", revision, report });
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setPluginReportState({
+          status: "error",
+          revision,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, [service, state.session]);
 
   useEffect(() => {
     const session = state.session;
@@ -1859,6 +1907,39 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
             <p className="empty-copy" role="alert" data-testid="navigation-error">
               {navigationError}
             </p>
+          )}
+
+          {pluginReportState.status !== "idle" && (
+            <section data-testid="plugin-report">
+              <h2>Plugin report</h2>
+              {pluginReportState.status === "loading" && <p>Analyzing repository…</p>}
+              {pluginReportState.status === "error" && (
+                <p role="alert">Plugin analysis unavailable: {pluginReportState.message}</p>
+              )}
+              {pluginReportState.status === "ready" && (
+                <>
+                  <p>
+                    {pluginReportState.report.summary.enabledPlugins} enabled ·{" "}
+                    {pluginReportState.report.summary.errorFindings} errors ·{" "}
+                    {pluginReportState.report.summary.warningFindings} warnings ·{" "}
+                    {pluginReportState.report.summary.infoFindings} info
+                  </p>
+                  <ul>
+                    {pluginReportState.report.plugins.map((plugin) => (
+                      <li key={plugin.id}>
+                        <strong>{plugin.name}</strong> — {plugin.status} ({plugin.findings.length}{" "}
+                        findings)
+                      </li>
+                    ))}
+                  </ul>
+                  {pluginReportState.report.diagnostics.length > 0 && (
+                    <p role="status">
+                      {pluginReportState.report.diagnostics.length} plugin diagnostics available.
+                    </p>
+                  )}
+                </>
+              )}
+            </section>
           )}
 
           {activeInspectionNode ? (

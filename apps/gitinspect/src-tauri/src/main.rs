@@ -11,7 +11,8 @@ use mutation_preview_commands::{
 use repository_commands::{
     AppState, choose_repository_path, get_commit_diff, get_commit_file_detail, open_repository,
     open_repository_compact, refresh_repository, refresh_repository_compact,
-    refresh_repository_compact_delta, start_repository_watch, stop_repository_watch,
+    refresh_repository_compact_delta, run_repository_plugins, start_repository_watch,
+    stop_repository_watch,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -96,6 +97,7 @@ fn main() {
             refresh_repository,
             refresh_repository_compact,
             refresh_repository_compact_delta,
+            run_repository_plugins,
             get_commit_diff,
             get_commit_file_detail,
             start_repository_watch,

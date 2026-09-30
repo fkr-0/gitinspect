@@ -6,8 +6,9 @@ use std::time::Duration;
 use gitinspect_core::{
     ChangeReason, CommitDiff, CommitFileDetail, CompactGitCommitBatch,
     CompactGitRepositorySnapshot, DiffOptions, FileDetailOptions, GitRefRecord, GitRemoteRecord,
-    GitRepositorySnapshot, OpenOptions, RepositoryAppendAwareRefresh, RepositoryHandle,
-    RepositoryRefreshCursor, RepositoryService, WatchOptions,
+    GitRepositorySnapshot, OpenOptions, PluginReport, PluginRunOptions,
+    RepositoryAppendAwareRefresh, RepositoryHandle, RepositoryRefreshCursor, RepositoryService,
+    WatchOptions,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
@@ -122,6 +123,10 @@ struct RepositoryEntry {
     handle: RepositoryHandle,
     revision: String,
     cursor: RepositoryRefreshCursor,
+}
+
+fn bounded_plugin_options(options: Option<PluginRunOptions>) -> PluginRunOptions {
+    options.unwrap_or_default().bounded()
 }
 
 fn bounded_diff_options(options: Option<DiffOptions>) -> DiffOptions {
@@ -357,6 +362,39 @@ impl RepositoryAuthority {
         })
     }
 
+    pub fn run_plugins(
+        &self,
+        repository_id: &str,
+        expected_revision: Option<&str>,
+        options: Option<PluginRunOptions>,
+    ) -> Result<PluginReport, String> {
+        let entry = self
+            .lock_repositories()?
+            .get(repository_id)
+            .cloned()
+            .ok_or_else(|| format!("unknown repository handle: {repository_id}"))?;
+        let observed_revision = entry.revision.clone();
+        if let Some(expected) = expected_revision
+            && expected != observed_revision
+        {
+            return Err(format!(
+                "stale repository revision: expected {expected}, current {observed_revision}"
+            ));
+        }
+
+        let report = entry
+            .handle
+            .run_plugins(bounded_plugin_options(options))
+            .map_err(|error| error.to_string())?;
+        if report.repository_revision != observed_revision {
+            return Err(format!(
+                "stale plugin report: expected revision {observed_revision}, analyzed {}",
+                report.repository_revision
+            ));
+        }
+        Ok(report)
+    }
+
     pub fn commit_diff(
         &self,
         repository_id: &str,
@@ -450,6 +488,18 @@ pub fn refresh_repository_compact(
     state
         .authority
         .refresh_compact(&repository_id, expected_revision.as_deref())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn run_repository_plugins(
+    repository_id: String,
+    expected_revision: Option<String>,
+    options: Option<PluginRunOptions>,
+    state: State<'_, AppState>,
+) -> Result<PluginReport, String> {
+    state
+        .authority
+        .run_plugins(&repository_id, expected_revision.as_deref(), options)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -646,6 +696,16 @@ mod tests {
         assert_eq!(tightened.binary_probe_bytes, 16);
         assert_eq!(tightened.max_files, 7);
 
+        let plugin_defaults = PluginRunOptions::default();
+        let plugin_bounded = bounded_plugin_options(Some(PluginRunOptions {
+            max_commits: usize::MAX,
+            max_files: usize::MAX,
+            max_file_bytes: u64::MAX,
+            max_total_content_bytes: u64::MAX,
+            max_findings_per_plugin: usize::MAX,
+        }));
+        assert_eq!(plugin_bounded, plugin_defaults);
+
         let detail_defaults = FileDetailOptions::default();
         let detail_bounded = bounded_file_detail_options(Some(FileDetailOptions {
             max_blob_bytes: u64::MAX,
@@ -686,6 +746,26 @@ mod tests {
         assert!(
             authority
                 .refresh(&opened.key, Some(&previous_revision))
+                .unwrap_err()
+                .contains("stale repository revision")
+        );
+
+        let plugin_report = authority
+            .run_plugins(&opened.key, Some(&refreshed.snapshot.revision), None)
+            .unwrap();
+        assert_eq!(
+            plugin_report.repository_revision,
+            refreshed.snapshot.revision
+        );
+        assert!(
+            plugin_report
+                .plugins
+                .iter()
+                .any(|plugin| plugin.id == "security-audit")
+        );
+        assert!(
+            authority
+                .run_plugins(&opened.key, Some(&previous_revision), None)
                 .unwrap_err()
                 .contains("stale repository revision")
         );

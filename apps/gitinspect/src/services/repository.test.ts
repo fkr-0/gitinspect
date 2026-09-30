@@ -42,6 +42,21 @@ describe("demo repository adapter", () => {
         files: snapshot.commits[0]?.files ?? [],
         truncated: false,
       }),
+      runPlugins: async (session) => ({
+        schemaVersion: 1,
+        apiVersion: 1,
+        repositoryRevision: session.snapshot.revision,
+        plugins: [],
+        summary: {
+          enabledPlugins: 0,
+          disabledPlugins: 0,
+          infoFindings: 0,
+          warningFindings: 0,
+          errorFindings: 0,
+        },
+        diagnostics: [],
+        truncated: false,
+      }),
       getCommitFileDetail: async (_session, oid, path) => ({
         oid,
         path,
@@ -82,6 +97,7 @@ describe("demo repository adapter", () => {
     expect(
       (await service.getCommitFileDetail(session, snapshot.commits[0]!.oid, "src/world.ts")).path,
     ).toBe("src/world.ts");
+    expect((await service.runPlugins(session)).repositoryRevision).toBe(snapshot.revision);
     const stop = await service.watchRepository(session, () => undefined);
     expect(watched).toBe(true);
     await stop();

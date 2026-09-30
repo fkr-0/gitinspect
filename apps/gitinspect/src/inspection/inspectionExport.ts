@@ -1,4 +1,4 @@
-import type { GitCommitDiff, GitCommitFileDetail } from "@gitinspect/contracts";
+import type { GitCommitDiff, GitCommitFileDetail, GitPluginReport } from "@gitinspect/contracts";
 import type { GraphNodeRecord } from "@gitinspect/graph-elements";
 
 export const GITINSPECT_INSPECTION_EXPORT_SCHEMA = "gitinspect-inspection/v1";
@@ -11,6 +11,7 @@ export interface InspectionExportInput {
   readonly node: GraphNodeRecord;
   readonly commitDiff?: GitCommitDiff;
   readonly fileDetail?: GitCommitFileDetail;
+  readonly pluginReport?: GitPluginReport;
 }
 
 /**
@@ -40,6 +41,7 @@ export function createInspectionExport(input: InspectionExportInput) {
     },
     ...(input.commitDiff === undefined ? {} : { commitDiff: input.commitDiff }),
     ...(input.fileDetail === undefined ? {} : { fileDetail: input.fileDetail }),
+    ...(input.pluginReport === undefined ? {} : { pluginReport: input.pluginReport }),
   };
 }
 
