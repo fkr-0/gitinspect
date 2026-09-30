@@ -138,7 +138,7 @@ The navigation stack carries dataset, mapper/layout keys, optional semantic sele
 1. Root-barrel exports above are the reusable in-repository surface. Deep imports are unsupported implementation coupling.
 2. The two reusable packages are private workspace packages; this reference does not claim npm publication, independent semantic-version compatibility, or a standalone binary/API distribution.
 3. Git-specific repository authority remains in Rust/Tauri and app-local adapters, not in graph-elements.
-4. Generic transaction types model capability shapes, not authorization. Original-repository apply remains unavailable in the qualified 0.2.x product.
+4. Generic transaction types model capability shapes, not authorization. Original-repository apply remains unavailable in the 0.3.x release train.
 5. Packaged-platform support is governed by `docs/RELEASE_CHECKLIST.md`, not by TypeScript export availability.
 
 For architectural ownership and safety boundaries, see `docs/ARCHITECTURE.md`. For release qualification and platform claims, see `docs/RELEASE_CHECKLIST.md`.

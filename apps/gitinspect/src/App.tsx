@@ -20,6 +20,7 @@ import { changedFilePathForGitSelection } from "./domain/gitVisualMapper";
 import { repositorySnapshotToGraphDataset } from "./domain/graphAdapter";
 import { GitCommitDrilldownResolver } from "./drilldown/gitCommitDrilldown";
 import { GitCommitDiffCache } from "./inspection/gitCommitDiffCache";
+import { serializeInspectionExport } from "./inspection/inspectionExport";
 import type { GitSearchFilters, GitSignatureState } from "./search";
 import {
   createDemoRepositoryService,
@@ -618,6 +619,27 @@ function formatProperty(value: unknown): string {
   return String(value);
 }
 
+export type SearchInputKeyboardAction =
+  | { readonly type: "clear" }
+  | { readonly type: "select"; readonly elementId: string };
+
+export function searchInputKeyboardAction(
+  key: string,
+  search: string,
+  activeFilterCount: number,
+  firstResultId: string | undefined,
+): SearchInputKeyboardAction | undefined {
+  if (key === "Escape" && search.length > 0) return { type: "clear" };
+  if (
+    key === "Enter" &&
+    firstResultId !== undefined &&
+    (search.trim().length > 0 || activeFilterCount > 0)
+  ) {
+    return { type: "select", elementId: firstResultId };
+  }
+  return undefined;
+}
+
 export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
   const fallbackService = useMemo(() => createDemoRepositoryService(), []);
   const service = repositoryService ?? fallbackService;
@@ -662,6 +684,8 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
   const [viewportSelection, setViewportSelection] = useState<SelectionState | undefined>();
   const [mutationDraftCount, setMutationDraftCount] = useState(0);
   const [mutationPreview, setMutationPreview] = useState<GitMutationPreview | undefined>();
+  const [copyNotice, setCopyNotice] = useState<string | undefined>();
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const captureViewportCamera = useCallback((camera: CameraState) => {
     viewportCameraRef.current = camera;
   }, []);
@@ -1047,6 +1071,51 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
     contextElementId === undefined
       ? undefined
       : state.dataset?.nodes.find((node) => node.id === contextElementId);
+  const inspectionExportJson = useMemo(() => {
+    if (!activeInspectionNode || !state.session) return undefined;
+    const commitDiff =
+      commitDiffState.status === "ready" && commitDiffState.oid === selectedCommitOid
+        ? commitDiffState.diff
+        : undefined;
+    const fileDetail =
+      fileDetailState.status === "ready" &&
+      fileDetailState.oid === selectedCommitOid &&
+      fileDetailState.path === selectedChangedFilePath
+        ? fileDetailState.detail
+        : undefined;
+    return serializeInspectionExport({
+      repositoryPath: state.session.snapshot.repositoryPath,
+      repositoryRevision: state.session.snapshot.revision,
+      ...(state.selectedElementId === undefined ? {} : { rootSelectionId: state.selectedElementId }),
+      navigationDepth,
+      node: activeInspectionNode,
+      ...(commitDiff === undefined ? {} : { commitDiff }),
+      ...(fileDetail === undefined ? {} : { fileDetail }),
+    });
+  }, [
+    activeInspectionNode,
+    commitDiffState,
+    fileDetailState,
+    navigationDepth,
+    selectedChangedFilePath,
+    selectedCommitOid,
+    state.selectedElementId,
+    state.session,
+  ]);
+
+  const copyText = useCallback(async (label: string, value: string) => {
+    try {
+      if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+        throw new Error("Clipboard API is unavailable in this runtime.");
+      }
+      await navigator.clipboard.writeText(value);
+      setCopyNotice(`${label} copied.`);
+    } catch (error) {
+      setCopyNotice(
+        `${label} could not be copied: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }, []);
 
   const openLogicalContext = useCallback(
     (elementId: string, selection: SelectionState) => {
@@ -1317,6 +1386,24 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [contextElementId, leaveCurrentWorld, navigationDepth]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleSearchShortcut = (event: KeyboardEvent) => {
+      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+      ) {
+        return;
+      }
+      event.preventDefault();
+      searchInputRef.current?.focus();
+    };
+    window.addEventListener("keydown", handleSearchShortcut);
+    return () => window.removeEventListener("keydown", handleSearchShortcut);
+  }, []);
+
   const visibleNodes = useMemo(
     () =>
       visibleLogicalNodesForSearch(
@@ -1464,10 +1551,30 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
           <label className="search-box">
             <span aria-hidden="true">⌕</span>
             <input
+              ref={searchInputRef}
               value={state.search}
+              aria-label="Search graph"
+              aria-keyshortcuts="/"
+              title="Press / to focus search"
               onChange={(event) =>
                 dispatch({ type: "searchChanged", search: event.currentTarget.value })
               }
+              onKeyDown={(event) => {
+                const action = searchInputKeyboardAction(
+                  event.key,
+                  state.search,
+                  activeSearchFilterCount,
+                  visibleNodes[0]?.id,
+                );
+                if (!action) return;
+                event.preventDefault();
+                if (action.type === "clear") {
+                  event.stopPropagation();
+                  dispatch({ type: "searchChanged", search: "" });
+                } else {
+                  selectLogicalElement(action.elementId);
+                }
+              }}
               placeholder="Search graph…"
             />
             {state.search && (
@@ -1756,6 +1863,42 @@ export function App({ repositoryService, autoOpenDemo = true }: AppProps) {
 
           {activeInspectionNode ? (
             <div className="inspection">
+              <section data-testid="inspection-share-export">
+                <h2>Share / export</h2>
+                <button
+                  type="button"
+                  className="button button--ghost"
+                  onClick={() => {
+                    if (typeof window === "undefined") return;
+                    const href = hrefForNavigationSnapshot(
+                      window.location.href,
+                      state.selectedElementId,
+                      navigation,
+                      navigationElementId,
+                    );
+                    void copyText("Deep link", href);
+                  }}
+                >
+                  Copy deep link
+                </button>
+                <button
+                  type="button"
+                  className="button button--ghost"
+                  disabled={inspectionExportJson === undefined}
+                  onClick={() => {
+                    if (inspectionExportJson !== undefined) {
+                      void copyText("Inspection JSON", inspectionExportJson);
+                    }
+                  }}
+                >
+                  Copy inspection JSON
+                </button>
+                {copyNotice && (
+                  <p role="status" aria-live="polite">
+                    {copyNotice}
+                  </p>
+                )}
+              </section>
               {interactionInspection && (
                 <section data-testid="viewport-interaction-selection">
                   <h2>Interaction selection</h2>

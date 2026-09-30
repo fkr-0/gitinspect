@@ -71,7 +71,7 @@ The historical scale/cache OCP task `legacy-cdp-task-3919226da5c17fbc2d342b9f708
 
 Exact-tag Linux AppImage qualification is green for `v0.2.1` and is recorded in `.git/gitinspect-package-qualification.json`. Linux X11/i3 native GPU/projection qualification remains separately blocked by the desktop/workspace cleanup environment. Tagged Release run `36523684953` is terminal failure because the Windows build requires the missing `apps/gitinspect/src-tauri/icons/icon.ico`; the draft GitHub Release remains unpublished. `release-evidence.yml` records these authority boundaries and residual actions.
 
-## Current 0.2.1 state
+## Historical 0.2.1 state
 
 ### Qualified product capability
 
@@ -85,7 +85,7 @@ Exact-tag Linux AppImage qualification is green for `v0.2.1` and is recorded in 
 - synthetic 1k/10k/100k scale evidence, with 100,004 logical nodes reduced to a bounded rendered projection;
 - original-repository mutation apply remains deliberately unavailable because the whole-source TOCTOU safety case is still NO-GO.
 
-### Release blockers still open
+### Historical release blockers at v0.2.1
 
 1. **Linux X11/i3 native qualification remains environment-blocked.** Retry `pnpm release:native-qualify` only at exact `v0.2.1`/HEAD after the desktop workspace-cleanup blocker is resolved; do not infer native GPU/projection authority from AppImage evidence.
 2. **The immutable `v0.2.1` tagged release cannot be published as-is.** Tagged Release run `36523684953` failed on Windows because `apps/gitinspect/src-tauri/icons/icon.ico` is missing; its publish job was skipped and the draft release remains unpublished.
@@ -103,6 +103,14 @@ These may ship if documented and accepted; they are not reasons to weaken safety
 - merge edges are not true dual-band/two-color geometry;
 - commit signature verification may remain unknown/unsigned when robust verification is unavailable;
 - original-repository destructive apply remains disabled/NO-GO.
+
+## 2026-09-30 — 0.3.x release train
+
+`v0.2.3` is the current published baseline and its complete tagged Linux/Windows/macOS matrix succeeded. The first 0.3.x candidate advances the canonical product surfaces to `0.3.0-rc.1` and adds keyboard-first search, copyable deep links for logical/drill-down state, and bounded deterministic inspector JSON export. These features are UI/read-only additions; original-repository mutation apply remains unavailable.
+
+Before the local `v0.3.0-rc.1` tag is created, the exact candidate commit must pass `pnpm release:candidate`, the release metadata/package harness self-tests, clean `pnpm release:package-qualify`, and the configured independent ws-bridge review. Linux X11/i3 native projection qualification remains a separate authority axis: absence of a fresh native run means this RC makes no new native GPU/projection claim. Remote tag push, GitHub Release publication, and deployment remain separate operator-authorized actions and are not implied by a local RC tag.
+
+The production Vite build continues to report the established GraphScene chunk-size warning. It remains non-fatal in the repository release gate; it should be treated as a future load-performance opportunity rather than silently reclassified as release failure.
 
 ## Final candidate gate
 

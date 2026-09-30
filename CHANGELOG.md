@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+The 0.3.x release train remains open after this first release candidate; further compatible improvements belong here rather than being folded silently into the tagged candidate.
+
+## [0.3.0-rc.1] - 2026-09-30
+
+### Added
+
+- Keyboard-first repository search: press `/` outside editable controls to focus search, Enter selects the highest-ranked visible result, and Escape clears a non-empty query without collapsing the current drill-down world.
+- Inspector sharing with copyable deep links that preserve logical selection plus bounded commit/file drill-down state.
+- Deterministic `gitinspect-inspection/v1` JSON export for the active semantic element, including repository/revision identity and already-loaded bounded commit diff or file-detail data without triggering additional repository reads.
+
+### Changed
+
+- Canonical ws-bridge configuration, reusable API reference, initial-release roadmap, release checklist, and machine-readable release evidence are now tracked repository assets rather than inherited untracked closeout files.
+- Product metadata advances together to `0.3.0-rc.1` while retaining the existing package/release command surface used by the 0.2.x line.
+
+### Compatibility and safety
+
+- Original-repository mutation apply remains unavailable; the new share/export paths are read-only and do not broaden repository authority.
+- `v0.2.3` remains the current published release. `v0.3.0-rc.1` is a locally qualified candidate unless a separate operator action authorizes push/publication.
+
 ## [0.2.3] - 2026-09-30
 
 ### Fixed

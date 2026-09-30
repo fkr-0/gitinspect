@@ -1482,7 +1482,7 @@ dependencies = [
 
 [[package]]
 name = "gitinspect-app"
-version = "0.2.3"
+version = "0.3.0-rc.1"
 dependencies = [
  "gitinspect-core",
  "rfd",
@@ -1493,7 +1493,7 @@ dependencies = [
 
 [[package]]
 name = "gitinspect-core"
-version = "0.2.3"
+version = "0.3.0-rc.1"
 dependencies = [
  "gix",
  "notify",

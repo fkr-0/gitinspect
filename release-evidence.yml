@@ -447,3 +447,55 @@ post_closeout_current_main_observation:
       - Tauri fmt, clippy, tests, and cargo check
       - Git whitespace check
     warning: 'Vite still reports the existing GraphScene chunk-size warning; it does not fail the release gate.'
+
+v0_3_0_rc1_development_qualification:
+  observed_at: '2026-09-30T12:15:00+02:00'
+  canonical_ocp_task: GITINSPECT-03X-R170-20260930
+  catalog_prompt: gitinspect-03x-dev-kickoff-20260930-v1
+  dispatch_attempt: 39e607569c724dd099f511e755e83373
+  workflow_packet: caa0d4ad-728b-48b9-92b5-b17dab118723
+  retained_release_docs_commit: e83ea7f8be9fdd8c9743a5a607b5ddbea2dbca3f
+  product_version: 0.3.0-rc.1
+  product_versions:
+    apps/gitinspect/src-tauri/tauri.conf.json: 0.3.0-rc.1
+    apps/gitinspect/src-tauri/Cargo.toml: 0.3.0-rc.1
+    crates/gitinspect-core/Cargo.toml: 0.3.0-rc.1
+    apps/gitinspect/package.json: 0.3.0-rc.1
+  user_facing_scope:
+    - keyboard-first repository search with slash focus, Enter-to-first-result, and query-local Escape clearing
+    - copyable deep links preserving logical selection and bounded child-world navigation
+    - deterministic gitinspect-inspection/v1 JSON export using only already-loaded bounded inspection data
+  compatibility_boundary:
+    existing_0_2_x_package_and_release_commands_changed: false
+    original_repository_apply_authorized: false
+    repository_authority_backend_changed: false
+  precommit_verification:
+    candidate_metadata: PASS
+    focused_app_tests: '17 passed across App and inspection-export suites'
+    focused_app_typecheck: PASS
+    focused_app_lint: PASS
+    release_candidate: PASS
+    app_tests: '171 passed across 28 files'
+    graph_elements_tests: '52 passed across 14 files'
+    production_vite_build: PASS
+    warning_fatal_biome_lint: PASS
+    gitinspect_core_fmt: PASS
+    gitinspect_core_clippy_deny_warnings: PASS
+    gitinspect_core_tests: PASS
+    tauri_fmt: PASS
+    tauri_clippy_deny_warnings: PASS
+    tauri_tests: PASS
+    tauri_check: PASS
+    git_whitespace_check: PASS
+    release_metadata_self_test: PASS
+    release_package_audit_self_test: PASS
+    release_package_qualification_harness_self_test: PASS
+  known_non_blocking_warning: >-
+    Vite reports the pre-existing GraphScene chunk above 500 kB after minification. The release gate
+    remains green; no new performance claim is made for this RC.
+  finalization_boundary:
+    exact_clean_package_qualification: pending_after_candidate_commit
+    independent_review: pending
+    local_tag: pending_v0.3.0-rc.1
+    linux_native_projection_claim: not_made_without_fresh_native_qualification
+    remote_push_or_publication: not_authorized

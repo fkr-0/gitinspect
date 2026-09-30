@@ -21,6 +21,7 @@ import {
   restoreNavigationFromUrlState,
   rewindNavigationToRoot,
   searchFilterText,
+  searchInputKeyboardAction,
   selectedPatchHunkIndexForInspection,
   shouldUseChildBrowserHistoryBack,
   viewportInteractionSelectionForDataset,
@@ -45,6 +46,7 @@ describe("gitinspect application shell", () => {
     expect(html).toContain("No original-repository apply command is exposed here");
     expect(html).toContain("Filters");
     expect(html).toContain("Signature");
+    expect(html).toContain('aria-keyshortcuts="/"');
     expect(html).toContain("Apply to repository");
     expect(html).toContain("disabled");
   });
@@ -154,6 +156,21 @@ describe("gitinspect application shell", () => {
     expect(changedFilePathForInspection(hunkNode, 2)).toBe("src/main.ts");
     expect(selectedPatchHunkIndexForInspection(hunkNode, 2)).toBe(2);
     expect(selectedPatchHunkIndexForInspection(hunkNode, 1)).toBeUndefined();
+  });
+
+  it("maps keyboard-first search commands without hijacking empty search", () => {
+    expect(searchInputKeyboardAction("/", "", 0, "commit:a")).toBeUndefined();
+    expect(searchInputKeyboardAction("Escape", "parser", 0, "commit:a")).toEqual({ type: "clear" });
+    expect(searchInputKeyboardAction("Enter", "parser", 0, "commit:a")).toEqual({
+      type: "select",
+      elementId: "commit:a",
+    });
+    expect(searchInputKeyboardAction("Enter", "", 1, "ref:main")).toEqual({
+      type: "select",
+      elementId: "ref:main",
+    });
+    expect(searchInputKeyboardAction("Enter", "", 0, "commit:a")).toBeUndefined();
+    expect(searchInputKeyboardAction("Enter", "parser", 0, undefined)).toBeUndefined();
   });
 
   it("uses ordered indexed search hits instead of a second ad-hoc substring filter", () => {
