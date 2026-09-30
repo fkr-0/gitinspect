@@ -1,0 +1,449 @@
+schema: gitinspect-release-closeout-evidence/v1
+recorded_at: '2026-09-29'
+task:
+  canonical_ocp_task: GITINSPECT-RELEASE-R53-20260929
+  prior_canonical_ocp_task: GITINSPECT-RELEASE-R50-20260929
+  catalog_prompt: gitinspect-02x-release-closeout-v1
+  prior_ocp_task: GITINSPECT-02X-RELEASE-CLOSEOUT-20260915
+  historical_workflow_packet: 48c272a4-035e-4144-a240-c0a920a9f139
+  prior_reconciliation_workflow_packet: 26c7462f-34a5-4c6d-947e-2b783c358e73
+  reconciliation_workflow_packet: bc89c2ee-77a0-48ef-b47f-b8842c5146b5
+  dispatch_attempt: 955d060d08584004be848f28e078a84a
+  canonical_state: complete_independent_review_approved
+  note: >-
+    GITINSPECT-RELEASE-R53-20260929 is the authoritative durable OCP identity for this execution.
+    GITINSPECT-RELEASE-R50-20260929 and earlier closeout identities, including GITINSPECT-02X-RELEASE-CLOSEOUT-20260915,
+    are retained only as historical evidence. R53 reconciles current main and live workflow ownership without replaying
+    already-landed implementation. It is governed by ws-bridge packet bc89c2ee-77a0-48ef-b47f-b8842c5146b5 with
+    closeout-only write scope; independent review approved R53 at 2026-09-29T17:39:50.087Z.
+
+release_unit:
+  description: GitInspect Tauri desktop application plus gitinspect-core at one repository revision
+  branch: main
+  head: b0d0524821cdb485d3701adde73070d3a9dd79bc
+  tag: v0.2.1
+  tag_type: annotated
+  tag_object: 610a6c3968cfa2ee82607c9ca52c9303a139d7b2
+  tag_target_commit: b0d0524821cdb485d3701adde73070d3a9dd79bc
+  tag_points_at_head: true
+  product_version: 0.2.1
+  product_versions:
+    apps/gitinspect/src-tauri/tauri.conf.json: 0.2.1
+    apps/gitinspect/src-tauri/Cargo.toml: 0.2.1
+    crates/gitinspect-core/Cargo.toml: 0.2.1
+    apps/gitinspect/package.json: 0.2.1
+  remote: git@github.com:fkr-0/gitinspect.git
+  push_or_publish_performed_by_this_closeout: false
+
+preexisting_worktree:
+  status_before_closeout:
+    - ' M CHANGELOG.md'
+    - '?? bridge.yml'
+    - '?? docs/API_REFERENCE.md'
+    - '?? docs/INITIAL_RELEASE_ROADMAP.md'
+    - '?? docs/RELEASE_CHECKLIST.md'
+    - '?? release-evidence.yml'
+  preservation: >-
+    The untracked closeout files and modified CHANGELOG.md were inherited from prior closeout work. This reconciliation
+    updates only release/documentation/evidence/configuration closeout files and preserves the inherited CHANGELOG.md
+    delta plus all denied product implementation paths.
+
+obligation_mapping:
+  - obligation: 0.2.x source and candidate release verification
+    disposition: complete
+    evidence:
+      - '14c75a4 test(release): enforce metadata contract in CI'
+      - '19848b0 release: reject staged whitespace in candidate gate'
+      - '6c87fcd ci: modernize release bootstrap and bridge commands'
+      - '2026-09-29 pnpm release:verify PASS at b0d0524821cdb485d3701adde73070d3a9dd79bc'
+      - '2026-09-29 pnpm release:candidate PASS at b0d0524821cdb485d3701adde73070d3a9dd79bc'
+    agent_task_status: not_advertised
+
+  - obligation: exact-candidate Linux AppImage qualification
+    disposition: complete_for_v0.2.1_exact_tag
+    evidence:
+      summary: .git/gitinspect-package-qualification.json
+      status: PASS
+      releaseQualified: true
+      head: b0d0524821cdb485d3701adde73070d3a9dd79bc
+      artifact: gitinspect_0.2.1_amd64.AppImage
+      artifact_bytes: 108530168
+      artifact_sha256: 6ca2a5fd76b9f1f64e8c2a145ca0fec1ece375857b0f9c2c2b0012316e11d9e8
+      packaged_smoke_exit_code: 0
+      original_apply_authorized: false
+    boundary: >-
+      This AppImage receipt is package/runtime evidence only. It is not Linux native
+      GPU/projection authority and says nothing about Windows or macOS execution quality.
+
+  - obligation: Linux X11/i3 native GPU/projection qualification for v0.2.1
+    disposition: residual_environment_blocker
+    retained_summary: .git/gitinspect-native-release-qualification-summary.json
+    last_attempt:
+      status: BLOCKED_ENVIRONMENT
+      recorded_at: '2026-09-29T04:40:47Z'
+      head: 3e305d04e1a0a8a07a2fe60fd08dc3c4ea4336ee
+      applicability: APPLICABLE_BLOCKED_ENVIRONMENT
+      blocker: >-
+        run 1 cleanup did not return to isolated empty workspace:
+        native=0 other=0 workspace_windows=0 active=0x3c16c32
+    residual_action: >-
+      Retry release:native-qualify at exact v0.2.1 commit
+      b0d0524821cdb485d3701adde73070d3a9dd79bc only after the desktop/workspace
+      cleanup environment is isolated.
+    agent_task_status: retained
+
+  - historical_ocp_task: legacy-cdp-task-3919226da5c17fbc2d342b9f708d0ccb
+    historical_lane: gitinspect-scale-cache-hardening
+    historical_state: terminal_blocked_retriable
+    historical_finish_reason: browser-restart orphan 20260905
+    disposition: implementation_complete_control_plane_record_historical
+    implementation_evidence:
+      - '6d229b45e85459f3e8727061f49da2dd25bd9b89 fix(inspection): preserve in-flight diff deduplication'
+      - '71201a397f37e48e13d9fdf1bbeb4a1e13edb8f4 fix(search): bound retained result candidates'
+      - 'c82f9cb70111d1aa03e3e64a0284e02fe8c7f453 test(search): pin fuzzy token budget accounting'
+      - 'current app suite PASS: 27 test files / 168 tests'
+      - 'current graph-elements suite PASS: 14 test files / 52 tests'
+      - 'current scale benchmarks PASS at 1k, 10k, and 100k logical commits'
+      - '100k fuzzy probe remained bounded at 16384 token comparisons with truncated=true'
+    closeout_action: >-
+      No search, inspection, services, or scale implementation path was reopened because
+      current verification reproduced no defect.
+
+current_main_repository_integrity:
+  evidence:
+    - '958bc03 perf(core): compact repository snapshots'
+    - 'f52091f fix(repository): validate in-flight refresh revisions'
+    - '7db710d fix(repository): harden native refresh cleanup'
+    - 'fa3553a fix(repository): validate compact snapshot identities'
+    - '4032771 fix(repository): reject stale full refresh revisions'
+    - '2618585 fix(repository): verify native revision fingerprints'
+    - 'c4de6c8 fix(repository): retain in-flight watcher refreshes'
+    - '7a5ffad fix(repository): reject duplicate compact metadata'
+
+verification:
+  reverified_at: '2026-09-29T18:21:46+02:00'
+  fresh_r50_aggregate:
+    command: >-
+      pnpm check && pnpm release:metadata-test && pnpm release:package-audit-test &&
+      pnpm release:package-harness-test && pnpm release:verify && pnpm release:candidate
+    exit_code: 0
+    wall_time_ms: 64768
+  workspace_checks:
+    commands:
+      - pnpm check
+    exit_code: 0
+    wall_time_ms: 14304
+    result: PASS
+    detail: 'graph-elements 14 files / 52 tests; app 27 files / 168 tests; production build PASS; 100k fuzzy probe tokensCompared=16384 with truncated=true'
+  release_self_tests:
+    command: >-
+      pnpm release:metadata-test &&
+      pnpm release:package-audit-test &&
+      pnpm release:package-harness-test
+    exit_code: 0
+    wall_time_ms: 10016
+  release_gates:
+    commands:
+      - pnpm release:verify
+      - pnpm release:candidate
+    exit_code: 0
+    release_verify_wall_time_ms: 19941
+    release_candidate_wall_time_ms: 19768
+  results:
+    release_metadata_test:
+      result: PASS
+      detail: 12 adversarial metadata cases passed
+    release_package_audit_test:
+      result: PASS
+      detail: RELEASE_PACKAGE_AUDIT_SELF_TEST=PASS
+    release_package_harness_test:
+      result: PASS
+      detail: RELEASE_PACKAGE_QUALIFICATION_SELF_TEST=PASS
+    release_verify:
+      result: PASS
+      head: b0d0524821cdb485d3701adde73070d3a9dd79bc
+      candidate_metadata: not_enforced
+    release_candidate:
+      result: PASS
+      head: b0d0524821cdb485d3701adde73070d3a9dd79bc
+      candidate_metadata: pass
+  covered_gates:
+    - workspace TypeScript typecheck
+    - graph-elements 52 tests
+    - gitinspect app 168 tests
+    - Vite production build
+    - warning-fatal Biome lint
+    - gitinspect-core fmt, clippy, tests, and doc tests
+    - Tauri fmt, clippy, tests, and cargo check
+    - Git whitespace check
+  non_blocking_warning:
+    - Vite reports GraphScene output above the default 500 kB chunk warning threshold.
+
+remote_release_state:
+  reverified_at: '2026-09-29T18:22:00+02:00'
+  workflow:
+    name: Tagged Release
+    run_id: 36523684953
+    event: push
+    head_branch: v0.2.1
+    head_sha: b0d0524821cdb485d3701adde73070d3a9dd79bc
+    status: completed
+    conclusion: failure
+    jobs:
+      verify_release_candidate: success
+      prepare_draft_github_release: success
+      build_linux_x86_64: success
+      build_macos_arm64: success
+      build_macos_x86_64: success
+      build_windows_x86_64: failure
+      publish_github_release: skipped
+  windows_failure:
+    stage: Build and upload Tauri bundles
+    repeated_error: >-
+      apps/gitinspect/src-tauri/icons/icon.ico not found; required for generating a
+      Windows Resource file during tauri-build.
+    interpretation: >-
+      This is a concrete Windows packaging defect in the immutable tagged revision,
+      not a flaky test or a scale/cache regression.
+  github_release:
+    tag: v0.2.1
+    name: GitInspect v0.2.1
+    draft: true
+    prerelease: false
+    published_at: null
+    uploaded_assets:
+      - gitinspect-0.2.1-darwin-aarch64.app.tar.gz
+      - gitinspect-0.2.1-darwin-aarch64.dmg
+      - gitinspect-0.2.1-darwin-x64.app.tar.gz
+      - gitinspect-0.2.1-darwin-x64.dmg
+      - gitinspect-0.2.1-linux-amd64.AppImage
+      - gitinspect-0.2.1-linux-amd64.deb
+      - gitinspect-0.2.1-linux-x86_64.rpm
+    windows_assets_present: false
+    publication_authority: blocked
+
+bridge_agent_tasks_after_reconciliation:
+  retained:
+    - >-
+      Retry Linux X11/i3 native qualification at exact v0.2.1 commit
+      b0d0524821cdb485d3701adde73070d3a9dd79bc only after the current
+      workspace-cleanup environment blocker is resolved.
+    - >-
+      Do not republish or move immutable v0.2.1. For a separately authorized future
+      patch release, add and qualify the Windows .ico bundle asset, rerun the complete
+      tagged matrix, and require terminal success before publication.
+  removed_or_rewritten_as_complete:
+    - source/candidate verification
+    - release documentation alignment
+    - historical scale/cache implementation
+    - tracking run 36523684953 as if it were still pending
+    - review-infrastructure placeholder; independent review is enforced by the ws-bridge workflow policy
+
+remaining_external_or_future_gates:
+  - >-
+    Current v0.2.1 Linux native X11/i3 qualification remains blocked by the desktop
+    workspace-cleanup environment; package evidence must not be promoted into native authority.
+  - >-
+    v0.2.1 remote publication is blocked and must remain unpublished because its Windows
+    job failed on the missing .ico asset.
+  - >-
+    The existing v0.2.1 tag must not be moved or republished. Any Windows asset repair
+    belongs to a separately authorized future patch release with a fresh tag and complete matrix.
+  - Packaged macOS artifacts were produced, but packaged execution quality was not established by this closeout.
+  - Original-repository mutation apply remains outside this release closeout and is not authorized.
+
+scope:
+  product_implementation_changed: false
+  denied_paths_changed: false
+  denied_paths:
+    - apps/gitinspect/src/services/**
+    - apps/gitinspect/src/search/**
+    - apps/gitinspect/src/inspection/**
+    - apps/gitinspect/src/scale/**
+  reconciliation_authored_files_changed:
+    - release-evidence.yml
+  inherited_closeout_files_preserved:
+    - bridge.yml
+    - CHANGELOG.md
+    - docs/API_REFERENCE.md
+    - docs/INITIAL_RELEASE_ROADMAP.md
+    - docs/RELEASE_CHECKLIST.md
+
+review:
+  required: true
+  independent: true
+  status: approved
+  status_authority: ws-bridge review verdict on R50 governed workflow packet
+  workflow_packet: 26c7462f-34a5-4c6d-947e-2b783c358e73
+  reviewer: gitinspect-r50-independent-reviewer
+  reviewed_at: '2026-09-29T16:28:41.257Z'
+  verdict_summary: >-
+    Independent read-only R50 review approved the evidence-only reconciliation. HEAD is
+    b0d0524821cdb485d3701adde73070d3a9dd79bc; annotated v0.2.1 tag object
+    610a6c3968cfa2ee82607c9ca52c9303a139d7b2 dereferences to that commit; cited historical
+    scale/cache and repository-integrity commits are ancestors; protected implementation paths
+    have no working-tree delta; bridge.yml advertises exactly the two genuine residual tasks;
+    icon.ico remains absent; Tagged Release run 36523684953 remains completed/failure with
+    Windows failure and publication skipped; and v0.2.1 remains a draft, unpublished release
+    with Linux/macOS assets and no Windows assets.
+  note: >-
+    R48 previously received independent approval at the same tagged HEAD and remains strong prior evidence only. The
+    older R47/R45/R43/20260915 tasks and historical packets remain evidence only and do not supersede the canonical R50
+    OCP identity above.
+
+r53_current_main_observation:
+  observed_at: '2026-09-29T19:35:18+02:00'
+  canonical_ocp_task: GITINSPECT-RELEASE-R53-20260929
+  workflow_packet: bc89c2ee-77a0-48ef-b47f-b8842c5146b5
+  concurrent_release_packet: dfd56eec-034c-473d-82fc-e414f5932c52
+  concurrent_release_objective: GitInspect 0.2.3 Windows bundle repair
+  current_head_before_concurrent_commit: ce830077cbe346b46c55c24ee8ce27e46b430fde
+  observed_worktree_product_version: 0.2.3
+  observed_product_versions:
+    apps/gitinspect/src-tauri/tauri.conf.json: 0.2.3
+    apps/gitinspect/src-tauri/Cargo.toml: 0.2.3
+    crates/gitinspect-core/Cargo.toml: 0.2.3
+    apps/gitinspect/package.json: 0.2.3
+  windows_bundle_icons_observed:
+    - apps/gitinspect/src-tauri/icons/icon.png
+    - apps/gitinspect/src-tauri/icons/icon.ico
+  authority_boundary: >-
+    The 0.2.3 files are concurrently owned by packet dfd56eec-034c-473d-82fc-e414f5932c52.
+    R53 does not edit, commit, tag, push, publish, or claim completion of that release lane.
+    Terminal CI/Pages/Tagged Release and published-asset evidence must come from that owner.
+  stale_obligations:
+    scale_cache: complete_historical_evidence_only
+    prior_0_2_2_bridge_task: replaced_by_live_0_2_3_packet
+  protected_implementation_paths_touched_by_r53: false
+  review_status: approved
+  reviewer: gitinspect-r53-independent-reviewer
+  reviewed_at: '2026-09-29T17:39:50.087Z'
+  review_workflow_packet: bc89c2ee-77a0-48ef-b47f-b8842c5146b5
+
+v0_2_3_release_closeout:
+  observed_at: '2026-09-30T10:24:03.749+02:00'
+  workflow_packet: dfd56eec-034c-473d-82fc-e414f5932c52
+  packet_state: completed
+  packet_review: approved
+  reviewer: gpt56sol-gitinspect-023-independent-reviewer
+  reviewed_at: '2026-09-30T08:24:03.749Z'
+  release_commit: 0446ec318d9cbe986a2adc0d4e1ece8de7fadcf8
+  release_tag:
+    name: v0.2.3
+    annotated_tag_object: 7327e3e6b037c67cc68fdf6c27b608aa4c28c932
+    dereferenced_target: 0446ec318d9cbe986a2adc0d4e1ece8de7fadcf8
+  immutable_prior_tag:
+    name: v0.2.2
+    annotated_tag_object: f6298372d7b21dd290a83a2593f6b60465207b02
+    dereferenced_target: ce830077cbe346b46c55c24ee8ce27e46b430fde
+  github_actions:
+    main_ci:
+      run_id: 36687220732
+      conclusion: success
+    pages:
+      run_id: 36687220754
+      conclusion: success
+    tag_ci:
+      run_id: 36687226955
+      conclusion: success
+    tagged_release:
+      run_id: 36687226869
+      conclusion: success
+      verify_candidate: success
+      linux_x86_64: success
+      windows_x86_64: success
+      macos_arm64: success
+      macos_x86_64: success
+      publish_release: success
+  github_release:
+    name: GitInspect v0.2.3
+    draft: false
+    prerelease: false
+    published_at: '2026-09-30T08:20:13Z'
+    url: https://github.com/fkr-0/gitinspect/releases/tag/v0.2.3
+    assets:
+      - gitinspect-0.2.3-windows-x64-setup.exe
+      - gitinspect-0.2.3-windows-x64.msi
+      - gitinspect-0.2.3-linux-amd64.AppImage
+      - gitinspect-0.2.3-linux-amd64.deb
+      - gitinspect-0.2.3-linux-x86_64.rpm
+      - gitinspect-0.2.3-darwin-aarch64.app.tar.gz
+      - gitinspect-0.2.3-darwin-aarch64.dmg
+      - gitinspect-0.2.3-darwin-x64.app.tar.gz
+      - gitinspect-0.2.3-darwin-x64.dmg
+  local_verification:
+    release_metadata_self_test: PASS
+    release_candidate: PASS
+    candidate_metadata: PASS
+    release_verification: PASS
+  bridge_task_advertisement_after_closeout: removed
+  remaining_external_blockers: []
+  protected_implementation_paths_touched_by_release: false
+  evidence_boundary: >-
+    Successful CI packaging on all four release lanes proves build/package publication for v0.2.3.
+    Linux native GPU/projection qualification remains a separate evidence axis and is not inferred
+    from package success.
+
+post_closeout_current_main_observation:
+  observed_at: '2026-09-29T19:11:00+02:00'
+  purpose: >-
+    Reconcile the historically complete R50 closeout against the newer main branch without replaying
+    already-landed implementation or overwriting the separately owned 0.2.2 release lane.
+  main_head: ce830077cbe346b46c55c24ee8ce27e46b430fde
+  main_commit: 'ce83007 release: prepare GitInspect 0.2.2'
+  product_version: 0.2.2
+  product_versions:
+    apps/gitinspect/src-tauri/tauri.conf.json: 0.2.2
+    apps/gitinspect/src-tauri/Cargo.toml: 0.2.2
+    crates/gitinspect-core/Cargo.toml: 0.2.2
+    apps/gitinspect/package.json: 0.2.2
+  local_tag:
+    name: v0.2.2
+    target: ce830077cbe346b46c55c24ee8ce27e46b430fde
+  remote_tag:
+    name: v0.2.2
+    tag_object: f6298372d7b21dd290a83a2593f6b60465207b02
+    dereferenced_target: ce830077cbe346b46c55c24ee8ce27e46b430fde
+  github_release:
+    name: GitInspect v0.2.2
+    draft: true
+    published_at: null
+    authority: >-
+      Publication remains owned by active workflow packet fc21c121-7bba-4118-98d2-c60aaa95e051;
+      this closeout does not claim terminal matrix success or publish authority.
+  workflow:
+    active_release_packet: fc21c121-7bba-4118-98d2-c60aaa95e051
+    historical_closeout_packet: 48c272a4-035e-4144-a240-c0a920a9f139
+    historical_closeout_packet_state: completed
+    historical_closeout_review: approved
+  stale_obligations_reconciled:
+    - >-
+      The historical scale/cache blocked-retriable control-plane record remains evidence-only because
+      commits 6d229b4, 71201a3, and c82f9cb are already landed and prior/current verification reproduced no defect.
+    - >-
+      The bridge no longer advertises the obsolete v0.2.1 future-patch repair task because that repair has
+      already materialized as the separately owned 0.2.2 release packet and tagged commit.
+    - >-
+      The v0.2.1 Linux native environment blocker is no longer advertised as a current exact-tag task;
+      Linux native GPU/projection authority remains a separate evidence axis for the active 0.2.2 release.
+  denied_implementation_paths_touched_by_this_reconciliation: false
+  current_main_verification:
+    yaml_parse: PASS
+    release_verify:
+      result: PASS
+      head: ce830077cbe346b46c55c24ee8ce27e46b430fde
+      product_version: 0.2.2
+    release_candidate:
+      result: PASS
+      head: ce830077cbe346b46c55c24ee8ce27e46b430fde
+      candidate_metadata: pass
+    covered:
+      - TypeScript typecheck
+      - graph-elements 52 tests
+      - gitinspect app 168 tests
+      - production Vite build
+      - warning-fatal Biome lint
+      - gitinspect-core fmt, clippy, tests, and doc tests
+      - Tauri fmt, clippy, tests, and cargo check
+      - Git whitespace check
+    warning: 'Vite still reports the existing GraphScene chunk-size warning; it does not fail the release gate.'
