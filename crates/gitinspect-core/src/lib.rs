@@ -14,6 +14,7 @@ mod mutation_authorization;
 mod mutation_durable_store;
 mod mutation_preflight;
 mod mutation_preview;
+mod plugins;
 mod repository;
 mod watch;
 
@@ -30,6 +31,7 @@ pub use mutation_authorization::*;
 pub use mutation_durable_store::*;
 pub use mutation_preflight::*;
 pub use mutation_preview::*;
+pub use plugins::*;
 pub use repository::{Error, RepositoryHandle, RepositoryService};
 pub use watch::{
     ChangeReason, NativeRepositoryWatcher, RawWatchEvent, RepositoryChange, WatchCoalescer,
