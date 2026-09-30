@@ -10,7 +10,7 @@ The desktop architecture deliberately separates **rendering** from **repository 
 
 ## Development status
 
-GitInspect 0.2.2 is the current public patch release. Real repository inspection, live refresh, the Git Railfield visualization, and copy-only mutation previews are qualified by the release gate. Original-repository mutation apply remains deliberately unavailable because the whole-source concurrency safety case is still NO-GO.
+GitInspect 0.2.3 is the current public patch release. Real repository inspection, live refresh, the Git Railfield visualization, and copy-only mutation previews are qualified by the release gate. Original-repository mutation apply remains deliberately unavailable because the whole-source concurrency safety case is still NO-GO.
 
 Published `v*` tags run the release candidate gate and build GitHub Release bundles for Linux x86_64, Windows x86_64, and macOS arm64/x86_64. Linux also has the repository's environment-sensitive native/AppImage qualification path; successful CI packaging on macOS and Windows is build/package evidence, not a claim of equivalent runtime qualification.
 

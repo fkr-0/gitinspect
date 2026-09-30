@@ -2,12 +2,24 @@
 
 ## Unreleased
 
+## [0.2.3] - 2026-09-30
+
+### Fixed
+
+- Added the committed Windows ICO to Tauri's explicit `bundle.icon` list. The immutable `v0.2.2` candidate compiled the Windows executable successfully, but WiX MSI bundling still failed because only the PNG was advertised to the bundler.
+- Hardened release metadata validation so candidate mode requires both a valid square PNG for Linux packaging and a valid configured ICO for Windows packaging, with regression coverage for an omitted Windows icon.
+
+### Release status
+
+- `v0.2.2` remains immutable failed-release evidence: candidate verification, Linux x86_64, and both macOS bundles passed; Windows reached the WiX packaging phase and then failed icon selection, so its draft GitHub Release was not published.
+- GitHub Pages remains configured for Actions and independently deploys the documentation/WASM artifact; desktop package publication still requires the complete tagged matrix.
+
 ## [0.2.2] - 2026-09-29
 
 ### Fixed
 
 - Added the Windows `icons/icon.ico` application resource required by Tauri's Windows resource generator. The immutable `v0.2.1` tag reached green candidate verification plus Linux and both macOS bundle jobs, but its Windows bundle failed solely because this resource was absent, so the draft `v0.2.1` GitHub Release was never published.
-- Requalified the patch through the complete tagged release matrix before publication rather than weakening or skipping the Windows lane.
+- The patch deliberately retained the complete tagged release matrix rather than weakening or skipping the Windows lane; that matrix exposed the remaining WiX icon-selection gap later fixed in 0.2.3.
 
 ### Release status
 

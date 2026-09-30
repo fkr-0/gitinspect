@@ -21,6 +21,7 @@ cp "$repo_root/scripts/release-check.sh" "$fixture_root/scripts/release-check.sh
 cp "$repo_root/apps/gitinspect/package.json" "$fixture_root/apps/gitinspect/package.json"
 cp "$repo_root/apps/gitinspect/src-tauri/tauri.conf.json" "$fixture_root/apps/gitinspect/src-tauri/tauri.conf.json"
 cp "$repo_root/apps/gitinspect/src-tauri/icons/icon.png" "$fixture_root/apps/gitinspect/src-tauri/icons/icon.png"
+cp "$repo_root/apps/gitinspect/src-tauri/icons/icon.ico" "$fixture_root/apps/gitinspect/src-tauri/icons/icon.ico"
 cp "$repo_root/apps/gitinspect/src-tauri/Cargo.toml" "$fixture_root/apps/gitinspect/src-tauri/Cargo.toml"
 cp "$repo_root/crates/gitinspect-core/Cargo.toml" "$fixture_root/crates/gitinspect-core/Cargo.toml"
 cp "$repo_root/packages/contracts/package.json" "$fixture_root/packages/contracts/package.json"
@@ -108,8 +109,9 @@ NODE
 expect_gate baseline --candidate 0 \
   'release_metadata=pass' \
   'bundle_active=true' \
-  'bundle_icon_count=1' \
-  'bundle_square_png=true'
+  'bundle_icon_count=2' \
+  'bundle_square_png=true' \
+  'bundle_windows_ico=true'
 
 restore_fixture
 mutate_json apps/gitinspect/package.json 'value.version = "9.9.9";'
@@ -142,10 +144,22 @@ expect_gate missing-bundle-icon --candidate 2 \
   'error=Tauri bundle.icon is empty; packaged desktop builds require explicit icon assets'
 
 restore_fixture
+mutate_json apps/gitinspect/src-tauri/tauri.conf.json 'value.bundle.icon = ["icons/icon.png"];'
+expect_gate missing-windows-bundle-icon --candidate 2 \
+  'error=Tauri bundle.icon has no valid ICO; Windows MSI packaging requires one'
+
+restore_fixture
+printf 'not-an-ico' > "$fixture_root/apps/gitinspect/src-tauri/icons/icon.ico"
+expect_gate invalid-windows-bundle-icon --candidate 2 \
+  'error=Tauri bundle ICO icon has an invalid header: icons/icon.ico' \
+  'error=Tauri bundle.icon has no valid ICO; Windows MSI packaging requires one'
+
+restore_fixture
 mutate_json apps/gitinspect/src-tauri/tauri.conf.json 'value.bundle.icon = ["icons/missing.png"];'
 expect_gate missing-bundle-icon-file --candidate 2 \
   'error=Tauri bundle icon is missing: icons/missing.png' \
-  'error=Tauri bundle.icon has no valid square PNG; Linux AppImage packaging requires one'
+  'error=Tauri bundle.icon has no valid square PNG; Linux AppImage packaging requires one' \
+  'error=Tauri bundle.icon has no valid ICO; Windows MSI packaging requires one'
 
 restore_fixture
 mkdir -p "$fixture_root/external-icons"

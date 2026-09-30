@@ -1,6 +1,6 @@
 [package]
 name = "gitinspect-app"
-version = "0.2.2"
+version = "0.2.3"
 description = "gitinspect desktop shell"
 edition = "2024"
 default-run = "gitinspect-app"

@@ -106,6 +106,7 @@ const bundleIcons = Array.isArray(tauriConfig.bundle?.icon)
   ? tauriConfig.bundle.icon.filter((value) => typeof value === 'string' && value.length > 0)
   : [];
 let squarePngIcon = false;
+let windowsIcoIcon = false;
 for (const icon of bundleIcons) {
   const resolved = path.resolve(bundleRoot, icon);
   if (resolved !== bundleRoot && !resolved.startsWith(`${bundleRoot}${path.sep}`)) {
@@ -127,7 +128,22 @@ for (const icon of bundleIcons) {
     candidateProblem(`Tauri bundle icon must be a regular non-symlink file: ${icon}`);
     continue;
   }
-  if (path.extname(icon).toLowerCase() !== '.png') continue;
+  const extension = path.extname(icon).toLowerCase();
+  if (extension === '.ico') {
+    const header = fs.readFileSync(resolved).subarray(0, 6);
+    if (
+      header.length < 6 ||
+      header.readUInt16LE(0) !== 0 ||
+      header.readUInt16LE(2) !== 1 ||
+      header.readUInt16LE(4) < 1
+    ) {
+      candidateProblem(`Tauri bundle ICO icon has an invalid header: ${icon}`);
+    } else {
+      windowsIcoIcon = true;
+    }
+    continue;
+  }
+  if (extension !== '.png') continue;
   const header = fs.readFileSync(resolved).subarray(0, 24);
   const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   if (header.length < 24 || !header.subarray(0, 8).equals(pngSignature)) {
@@ -142,6 +158,9 @@ if (bundleIcons.length === 0) {
   candidateProblem('Tauri bundle.icon is empty; packaged desktop builds require explicit icon assets');
 } else if (!squarePngIcon) {
   candidateProblem('Tauri bundle.icon has no valid square PNG; Linux AppImage packaging requires one');
+}
+if (!windowsIcoIcon) {
+  candidateProblem('Tauri bundle.icon has no valid ICO; Windows MSI packaging requires one');
 }
 
 const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
@@ -161,6 +180,7 @@ console.log(`graph_elements_private_version=${graphElementsPackage.version}`);
 console.log(`bundle_active=${String(tauriConfig.bundle?.active === true)}`);
 console.log(`bundle_icon_count=${bundleIcons.length}`);
 console.log(`bundle_square_png=${String(squarePngIcon)}`);
+console.log(`bundle_windows_ico=${String(windowsIcoIcon)}`);
 for (const warning of warnings) console.log(`warning=${warning}`);
 for (const error of errors) console.error(`error=${error}`);
 if (errors.length > 0) process.exit(2);
