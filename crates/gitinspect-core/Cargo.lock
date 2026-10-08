@@ -313,12 +313,21 @@ dependencies = [
 name = "gitinspect-core"
 version = "0.3.0-rc.1"
 dependencies = [
+ "gitinspect-model",
  "gix",
  "notify",
  "serde",
  "serde_json",
  "sha2",
  "similar",
+ "thiserror",
+]
+
+[[package]]
+name = "gitinspect-model"
+version = "0.3.0-rc.1"
+dependencies = [
+ "serde",
  "thiserror",
 ]
 

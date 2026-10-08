@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 wasm-bindgen = "=0.2.127"
+gitinspect-model = { path = "../gitinspect-model" }
 
 [lints.rust]
 unsafe_code = "forbid"

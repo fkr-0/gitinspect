@@ -6,10 +6,7 @@
 //! in this phase: signed commits are reported as `unknown`, unsigned commits as
 //! `unsigned`.
 
-mod compact;
-mod delta;
 mod diff;
-mod model;
 mod mutation_authorization;
 mod mutation_durable_store;
 mod mutation_preflight;
@@ -18,15 +15,7 @@ mod plugins;
 mod repository;
 mod watch;
 
-pub use compact::{
-    CompactGitCommitBatch, CompactGitCommitRecord, CompactGitRepositorySnapshot,
-    CompactSnapshotError,
-};
-pub use delta::{
-    DeltaApplyError, DeltaValidationError, MAX_APPEND_DELTA_COMMITS, RepositoryAppendAwareRefresh,
-    RepositoryAppendDelta, RepositoryAppendMetadata, RepositoryRefreshCursor,
-};
-pub use model::*;
+pub use gitinspect_model::*;
 pub use mutation_authorization::*;
 pub use mutation_durable_store::*;
 pub use mutation_preflight::*;

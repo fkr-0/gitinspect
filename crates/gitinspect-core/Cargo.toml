@@ -6,6 +6,7 @@ license = "MIT"
 publish = false
 
 [dependencies]
+gitinspect-model = { path = "../gitinspect-model" }
 gix = { version = "0.86.0", features = ["blob-diff", "revision"] }
 notify = "8.2.0"
 serde = { version = "1.0", features = ["derive"] }
