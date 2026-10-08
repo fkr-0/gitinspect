@@ -68,7 +68,7 @@ export function parseInspectionExport(json: string): ReturnType<typeof createIns
   )
     throw new InspectionLimitError("Invalid inspection field type or bound.");
   try {
-    return parseInspectionJson(json) as ReturnType<typeof createInspectionExport>;
+    return parseInspectionJson(json) as unknown as ReturnType<typeof createInspectionExport>;
   } catch {
     throw new InspectionLimitError("Invalid or unsafe inspection JSON.");
   }
