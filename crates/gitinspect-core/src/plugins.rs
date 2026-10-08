@@ -1897,4 +1897,90 @@ mod tests {
         );
         assert!(!report.plugins.iter().any(|plugin| plugin.id == "escape"));
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_manifest_file_is_rejected_even_when_target_is_inside_plugin_root() {
+        use std::os::unix::fs::symlink;
+        let fixture = Fixture::new();
+        fixture.write(".gitinspect/plugins/real.json", "{}");
+        symlink(
+            "real.json",
+            fixture.path.join(".gitinspect/plugins/link.json"),
+        )
+        .unwrap();
+        let err = load_manifest(
+            &fixture.path,
+            &fixture.path.join(".gitinspect/plugins"),
+            &fixture.path.join(".gitinspect/plugins/link.json"),
+            None,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("regular file"));
+    }
+
+    #[test]
+    fn configured_manifest_paths_and_unicode_aliases_fail_closed() {
+        let fixture = Fixture::new();
+        fixture.write(".gitinspect/plugins/real.json", "{}");
+        fixture.write("outside.json", "{}");
+        let root = fixture.path.join(".gitinspect/plugins");
+        let candidates = [
+            fixture.path.join("outside.json"),
+            fixture.path.join(".gitinspect/plugins/../../outside.json"),
+            fixture.path.join(".gitinspect/plugins/REAL.JSON"),
+            fixture.path.join(".gitinspect/plugins/re\u{301}al.json"),
+        ];
+        for candidate in candidates {
+            assert!(
+                load_manifest(&fixture.path, &root, &candidate, None).is_err(),
+                "untrusted manifest path unexpectedly accepted: {}",
+                candidate.display()
+            );
+        }
+    }
+
+    #[test]
+    fn oversized_and_deeply_nested_manifests_are_rejected() {
+        let fixture = Fixture::new();
+        let root = fixture.path.join(".gitinspect/plugins");
+        fixture.write(
+            ".gitinspect/plugins/huge.json",
+            &"x".repeat(MAX_MANIFEST_BYTES as usize + 1),
+        );
+        let err = load_manifest(&fixture.path, &root, &root.join("huge.json"), None).unwrap_err();
+        assert!(err.to_string().contains("exceeds"));
+
+        // Serde JSON's recursion bound rejects nested input rather than overflowing the stack.
+        let nested = format!("{}0{}", "[".repeat(200), "]".repeat(200));
+        fixture.write(".gitinspect/plugins/deep.json", &nested);
+        assert!(load_manifest(&fixture.path, &root, &root.join("deep.json"), None).is_err());
+    }
+
+    #[test]
+    fn caller_options_cannot_raise_plugin_scan_limits() {
+        let defaults = PluginRunOptions::default();
+        let raised = PluginRunOptions {
+            max_commits: usize::MAX,
+            max_files: usize::MAX,
+            max_file_bytes: u64::MAX,
+            max_total_content_bytes: u64::MAX,
+            max_findings_per_plugin: usize::MAX,
+        }
+        .bounded();
+        assert_eq!(raised, defaults);
+
+        let fixture = Fixture::new();
+        fixture.write(".gitinspect.yml",
+            "version: 1\nplugins:\n  security-audit:\n    max-files: 999999999\n    max-total-content-bytes: 999999999\n");
+        let config =
+            parse_config(&fs::read_to_string(fixture.path.join(".gitinspect.yml")).unwrap())
+                .unwrap();
+        assert_eq!(
+            config.entries["security-audit"].settings["max-files"],
+            "999999999"
+        );
+        // Untrusted settings never replace the host's bounded run options.
+        assert_eq!(PluginRunOptions::default().bounded(), defaults);
+    }
 }
