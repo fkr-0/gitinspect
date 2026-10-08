@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1168,6 +1169,16 @@ fn load_manifest(
     path: &Path,
     configured_id: Option<&str>,
 ) -> Result<PluginManifest, PluginError> {
+    load_manifest_with_hook(repository_root, plugin_root, path, configured_id, || {})
+}
+
+fn load_manifest_with_hook(
+    repository_root: &Path,
+    plugin_root: &Path,
+    path: &Path,
+    configured_id: Option<&str>,
+    after_open: impl FnOnce(),
+) -> Result<PluginManifest, PluginError> {
     if path.extension().and_then(|value| value.to_str()) != Some("json") {
         return Err(PluginError::Config(format!(
             "plugin manifest must use .json: {}",
@@ -1192,6 +1203,34 @@ fn load_manifest(
     }
 
     let canonical_root = validate_plugin_root(repository_root, plugin_root)?;
+    // Open exactly once. Everything checked below must describe this handle,
+    // not a pathname which can be replaced between validation and reading.
+    let file = fs::File::open(path).map_err(|source| PluginError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    after_open();
+    let opened_metadata = file.metadata().map_err(|source| PluginError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if !opened_metadata.is_file() || opened_metadata.len() > MAX_MANIFEST_BYTES {
+        return Err(PluginError::Config(format!(
+            "plugin manifest must be a regular file no larger than {MAX_MANIFEST_BYTES} bytes: {}",
+            path.display()
+        )));
+    }
+    #[cfg(target_os = "linux")]
+    let canonical_path = {
+        use std::os::fd::AsRawFd;
+        fs::canonicalize(format!("/proc/self/fd/{}", file.as_raw_fd())).map_err(|source| {
+            PluginError::Io {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?
+    };
+    #[cfg(not(target_os = "linux"))]
     let canonical_path = fs::canonicalize(path).map_err(|source| PluginError::Io {
         path: path.to_path_buf(),
         source,
@@ -1203,10 +1242,19 @@ fn load_manifest(
         )));
     }
 
-    let raw = fs::read_to_string(&canonical_path).map_err(|source| PluginError::Io {
-        path: canonical_path.clone(),
-        source,
-    })?;
+    let mut raw = String::new();
+    file.take(MAX_MANIFEST_BYTES + 1)
+        .read_to_string(&mut raw)
+        .map_err(|source| PluginError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if raw.len() as u64 > MAX_MANIFEST_BYTES {
+        return Err(PluginError::Config(format!(
+            "plugin manifest exceeds {MAX_MANIFEST_BYTES} bytes: {}",
+            path.display()
+        )));
+    }
     let manifest: PluginManifest = serde_json::from_str(&raw).map_err(|error| {
         PluginError::Config(format!(
             "invalid declarative plugin {}: {error}",
@@ -1917,6 +1965,29 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("regular file"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn manifest_swap_after_open_never_reads_symlink_target() {
+        use std::os::unix::fs::symlink;
+        let fixture = Fixture::new();
+        let root = fixture.path.join(".gitinspect/plugins");
+        let path = root.join("safe.json");
+        fixture.write(
+            ".gitinspect/plugins/safe.json",
+            r#"{"schemaVersion":1,"id":"safe","name":"Safe","rules":[{"id":"r","source":"file","field":"path","operator":"contains","value":"x","message":"ok"}]}"#,
+        );
+        fixture.write(
+            "outside.json",
+            r#"{"schemaVersion":1,"id":"outside","name":"Outside","rules":[]}"#,
+        );
+        let result = load_manifest_with_hook(&fixture.path, &root, &path, None, || {
+            fs::rename(&path, root.join("original.json")).unwrap();
+            symlink(fixture.path.join("outside.json"), &path).unwrap();
+        })
+        .unwrap();
+        assert_eq!(result.id, "safe");
     }
 
     #[test]
