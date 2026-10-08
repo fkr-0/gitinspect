@@ -5,7 +5,7 @@
 #[cfg(test)]
 mod tests {
     use gitinspect_core::{OpenOptions, RepositoryService};
-    use gitinspect_model::{InMemorySource, SourceRef, assemble_graph};
+    use gitinspect_model::{InMemorySource, SourceRef, assemble_snapshot};
     use std::{fs, path::Path, process::Command};
 
     fn git(path: &Path, args: &[&str]) -> String {
@@ -80,7 +80,15 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let source = InMemorySource::new(commits, refs).unwrap();
-        let model = assemble_graph(&source, OpenOptions::default().max_commits).unwrap();
+        let model = assemble_snapshot(
+            &source,
+            OpenOptions::default().max_commits,
+            Some(&git(&unique, &["rev-parse", "HEAD"])),
+            Some("refs/heads/main"),
+            "<fixture>",
+            "<fixture>/.git",
+        )
+        .unwrap();
         assert_eq!(
             native.commits, model.commits,
             "ordered native commit records diverge"
@@ -97,6 +105,13 @@ mod tests {
         let mut golden = serde_json::to_value(&native).unwrap();
         golden["repositoryPath"] = serde_json::Value::String("<fixture>".into());
         golden["gitDir"] = serde_json::Value::String("<fixture>/.git".into());
+        // Compare the ENTIRE envelope, not only records. Empty remotes/hooks are
+        // fixture properties; filesystem-derived path labels are normalized above.
+        assert_eq!(
+            serde_json::to_value(&model).unwrap(),
+            golden,
+            "independent model snapshot differs from native envelope"
+        );
         let serialized = serde_json::to_string_pretty(&golden).unwrap();
         if std::env::var_os("GITINSPECT_PRINT_GOLDEN").is_some() {
             println!("GOLDEN_BEGIN\n{serialized}\nGOLDEN_END");

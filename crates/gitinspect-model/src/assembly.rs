@@ -1,6 +1,7 @@
 //! Pure, bounded commit projection over caller-verified, inflated Git objects.
 //! This module deliberately has no filesystem or repository authority.
 use gix_object::bstr::ByteSlice;
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::{
@@ -15,6 +16,65 @@ pub struct AssembledGraph {
     pub commits: Vec<GitCommitRecord>,
     pub refs: Vec<GitRefRecord>,
     pub truncated: bool,
+}
+
+/// Assemble the native-compatible snapshot envelope without filesystem authority.
+/// Paths are caller-supplied display labels, never permissions or source handles.
+/// HEAD must be supplied explicitly: it cannot be inferred from refs sharing an OID.
+pub fn assemble_snapshot<S: ObjectSource + RefSource>(
+    source: &S,
+    max_commits: usize,
+    head: Option<&str>,
+    head_ref: Option<&str>,
+    repository_path: &str,
+    git_dir: &str,
+) -> Result<crate::GitRepositorySnapshot, SourceError> {
+    if let Some(oid) = head {
+        crate::validate_oid(oid)?;
+    }
+    if let Some(name) = head_ref
+        && (!name.starts_with("refs/") || name.contains("..") || name.contains(['\0', '\n', '\r']))
+    {
+        return Err(SourceError::InvalidIdentifier);
+    }
+    let graph = assemble_graph(source, max_commits)?;
+    let mut hasher = Sha256::new();
+    hasher.update(b"gitinspect-snapshot-v1\0");
+    if let Some(oid) = head {
+        hasher.update(oid.as_bytes());
+    }
+    hasher.update([0]);
+    if let Some(name) = head_ref {
+        hasher.update(name.as_bytes());
+    }
+    hasher.update([0]);
+    for reference in &graph.refs {
+        hasher.update(reference.name.as_bytes());
+        hasher.update([0]);
+        hasher.update(reference.target_oid.as_bytes());
+        hasher.update([0]);
+        if let Some(symbolic) = &reference.symbolic_target {
+            hasher.update(symbolic.as_bytes());
+        }
+        hasher.update([0]);
+        if let Some(upstream) = &reference.upstream {
+            hasher.update(upstream.as_bytes());
+        }
+        hasher.update([0]);
+    }
+    Ok(crate::GitRepositorySnapshot {
+        schema_version: 1,
+        repository_path: repository_path.to_owned(),
+        git_dir: git_dir.to_owned(),
+        head: head.map(str::to_owned),
+        head_ref: head_ref.map(str::to_owned),
+        revision: format!("sha256:{:x}", hasher.finalize()),
+        commits: graph.commits,
+        refs: graph.refs,
+        remotes: Vec::new(),
+        hooks: Vec::new(),
+        truncated: graph.truncated,
+    })
 }
 
 /// Traverse commit parents without allocating more than `max_commits` records.
