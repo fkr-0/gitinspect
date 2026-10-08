@@ -4,6 +4,8 @@
 
 GitInspect now has an **experimental browser/WASM boundary**, but the native Rust core is not being misrepresented as browser-ready.
 
+The first backend extraction milestone now lives in `crates/gitinspect-model`. It owns the serializable snapshot types, compact transport and append-aware delta logic, and exposes small read-only `ObjectSource` and `RefSource` traits. `gitinspect-core` re-exports the same types so native callers remain source-compatible. Both `gitinspect-model` and `gitinspect-wasm` compile for `wasm32-unknown-unknown`; this is a build qualification, **not** a working browser object database. The adapters, pack/index decoding, repository picker, worker, snapshot equivalence and fixture smoke remain outstanding. The demo intentionally remains synthetic until these are independently verified.
+
 The current split is deliberate:
 
 | Capability | Desktop/Tauri | Browser/WASM experiment |
@@ -11,12 +13,12 @@ The current split is deliberate:
 | React/Three visualization | yes | yes |
 | Git Railfield / search / selection / LOD | yes | yes |
 | Rust code executing as WebAssembly | n/a | yes |
-| Real repository parsing with `gix` | yes | **no** |
+| Real repository parsing with `gix` | yes | **no**; object/ref traits only |
 | Filesystem watching | yes | **no** |
 | Original-repository mutation authority | **not authorized** | **no** |
 | Browser repository source | n/a | deterministic synthetic demo |
 
-`crates/gitinspect-core` currently depends on native repository and watcher facilities (`gix`, `notify`) and therefore remains the desktop authority. The browser experiment uses the small `crates/gitinspect-wasm` crate as a versioned Rust/WASM boundary. The WebAssembly module proves cross-language execution with a deterministic runtime fingerprint and publishes an explicit fail-closed capability record.
+`crates/gitinspect-core` depends on native repository and watcher facilities (`gix`, `notify`) and therefore remains the desktop authority. The extracted `gitinspect-model` has neither native dependency; its source traits grant no file access by themselves. The browser experiment uses the small `crates/gitinspect-wasm` crate as a versioned Rust/WASM boundary. The WebAssembly module proves cross-language execution with a deterministic runtime fingerprint and publishes an explicit fail-closed capability record.
 
 The WASM page will not silently fall back to a plain JavaScript claim if the module cannot load: the browser entry displays a startup failure instead.
 
