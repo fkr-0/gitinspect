@@ -1958,6 +1958,39 @@ mod tests {
     }
 
     #[test]
+    fn regex_and_glob_operators_are_not_executable_plugin_rules() {
+        let fixture = Fixture::new();
+        let root = fixture.path.join(".gitinspect/plugins");
+        for (index, operator) in ["regex", "glob", "matches", "pattern"].iter().enumerate() {
+            let manifest = serde_json::json!({
+                "schemaVersion": 1,
+                "id": format!("hostile-{index}"),
+                "name": "Hostile pattern",
+                "rules": [{
+                    "id": "path-pattern",
+                    "source": "file",
+                    "field": "path",
+                    "operator": operator,
+                    "value": "(a+)+$",
+                    "message": "unreachable"
+                }]
+            });
+            fixture.write(
+                &format!(".gitinspect/plugins/hostile-{index}.json"),
+                &manifest.to_string(),
+            );
+            let err = load_manifest(
+                &fixture.path,
+                &root,
+                &root.join(format!("hostile-{index}.json")),
+                None,
+            )
+            .unwrap_err();
+            assert!(err.to_string().contains("unknown variant"), "{err}");
+        }
+    }
+
+    #[test]
     fn caller_options_cannot_raise_plugin_scan_limits() {
         let defaults = PluginRunOptions::default();
         let raised = PluginRunOptions {
