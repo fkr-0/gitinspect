@@ -20,9 +20,9 @@ const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/cs
 const server = createServer(async (req, res) => {
   try {
     const pathname = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
-    const target = resolve(root, "." + (pathname === "/" ? "/" + entry : pathname));
+    const target = resolve(root, `.${pathname === "/" ? `/${entry}` : pathname}`);
     const rel = relative(root, target);
-    if (rel === ".." || rel.startsWith(".." + sep) || resolve(rel) === target) {
+    if (rel === ".." || rel.startsWith(`..${sep}`) || resolve(rel) === target) {
       res.writeHead(403).end("forbidden");
       return;
     }
@@ -68,7 +68,7 @@ try {
   // Two animation frames allow the restored R3F loop to submit new work.
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   await page.screenshot({ path: resolve(shots, "after.png") });
-  if (faults.length) throw new Error("uncaught browser failures: " + faults.join("; "));
+  if (faults.length) throw new Error(`uncaught browser failures: ${faults.join("; ")}`);
   console.log("WebGL recovery PASS; screenshots:", shots);
 } catch (error) {
   console.error("WebGL recovery FAIL:", error);
