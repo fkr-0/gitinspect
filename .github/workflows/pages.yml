@@ -25,16 +25,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 11.3.0
           run_install: false
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -43,7 +43,12 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.0
+          components: rustfmt, clippy
           targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/gitinspect-wasm -> target
 
       - name: Install JavaScript dependencies
         run: pnpm install --frozen-lockfile
@@ -89,7 +94,7 @@ jobs:
 
       - name: Upload smoke-test screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wasm-smoke-screenshots
           path: smoke-screenshots

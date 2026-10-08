@@ -7,17 +7,23 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   typescript:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/setup@v2
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.3.0
-          runtime: node@24
-          cache: true
-          install: false
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm release:metadata
       - run: pnpm release:metadata-test
