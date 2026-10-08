@@ -1,0 +1,41 @@
+{
+  "commits": [
+    {
+      "authorEmail": "ada@example.org",
+      "authorName": "Ada",
+      "authoredAtMs": 1700000000000,
+      "committedAtMs": 1700000000000,
+      "files": [],
+      "message": "b.txt\n",
+      "oid": "a3a8549f25f0d37531a175fa3793c561f8c9611b",
+      "parents": ["04d80c844aab1ef472b89fbb735449e2b74314b3"],
+      "signatureStatus": "unsigned",
+      "treeOid": "68ba7e4f796cbce5ed86bad3e9df986fb138d99f"
+    },
+    {
+      "authorEmail": "ada@example.org",
+      "authorName": "Ada",
+      "authoredAtMs": 1700000000000,
+      "committedAtMs": 1700000000000,
+      "files": [],
+      "message": "a.txt\n",
+      "oid": "04d80c844aab1ef472b89fbb735449e2b74314b3",
+      "parents": [],
+      "signatureStatus": "unsigned",
+      "treeOid": "42d4c5245460645340a0b5b189f055b93cca0f7e"
+    }
+  ],
+  "gitDir": "<fixture>/.git",
+  "head": "a3a8549f25f0d37531a175fa3793c561f8c9611b",
+  "headRef": "refs/heads/main",
+  "hooks": [],
+  "refs": [
+    {"kind": "local-branch", "name": "refs/heads/main", "targetOid": "a3a8549f25f0d37531a175fa3793c561f8c9611b"},
+    {"kind": "tag", "name": "refs/tags/v1", "targetOid": "a3a8549f25f0d37531a175fa3793c561f8c9611b"}
+  ],
+  "remotes": [],
+  "repositoryPath": "<fixture>",
+  "revision": "sha256:38380cb09e333bab18c5c181dc76f270e8d7d79c93b8135a9839069947a14914",
+  "schemaVersion": 1,
+  "truncated": false
+}
