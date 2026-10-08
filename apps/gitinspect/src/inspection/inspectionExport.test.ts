@@ -4,9 +4,28 @@ import {
   GITINSPECT_INSPECTION_EXPORT_SCHEMA,
   createInspectionExport,
   serializeInspectionExport,
+  InspectionLimitError,
 } from "./inspectionExport";
 
 describe("inspection export", () => {
+  it("rejects excessive navigation depth and oversized Unicode JSON rather than truncating", () => {
+    const base = {
+      repositoryPath: "/repo",
+      repositoryRevision: "rev",
+      navigationDepth: 0,
+      node: { id: "test", kind: "commit", properties: {} },
+    };
+    expect(() => serializeInspectionExport({ ...base, navigationDepth: 3 })).toThrow(
+      InspectionLimitError,
+    );
+    expect(() =>
+      serializeInspectionExport({
+        ...base,
+        node: { ...base.node, properties: { text: "é".repeat(600_000) } },
+      }),
+    ).toThrow(InspectionLimitError);
+  });
+
   it("serializes the active semantic element with repository and navigation identity", () => {
     const payload = createInspectionExport({
       repositoryPath: "/repo",

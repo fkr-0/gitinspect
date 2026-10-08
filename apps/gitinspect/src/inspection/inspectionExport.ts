@@ -2,6 +2,12 @@ import type { GitCommitDiff, GitCommitFileDetail, GitPluginReport } from "@gitin
 import type { GraphNodeRecord } from "@gitinspect/graph-elements";
 
 export const GITINSPECT_INSPECTION_EXPORT_SCHEMA = "gitinspect-inspection/v1";
+export const MAX_INSPECTION_EXPORT_BYTES = 1024 * 1024;
+export const MAX_INSPECTION_NAVIGATION_DEPTH = 2;
+
+export class InspectionLimitError extends Error {
+  override name = "InspectionLimitError";
+}
 
 export interface InspectionExportInput {
   readonly repositoryPath: string;
@@ -20,6 +26,13 @@ export interface InspectionExportInput {
  * reads, so exporting cannot silently broaden inspection authority.
  */
 export function createInspectionExport(input: InspectionExportInput) {
+  if (
+    !Number.isInteger(input.navigationDepth) ||
+    input.navigationDepth < 0 ||
+    input.navigationDepth > MAX_INSPECTION_NAVIGATION_DEPTH
+  ) {
+    throw new InspectionLimitError("Inspection navigation exceeds the maximum depth of 2.");
+  }
   return {
     schema: GITINSPECT_INSPECTION_EXPORT_SCHEMA,
     repository: {
@@ -46,5 +59,9 @@ export function createInspectionExport(input: InspectionExportInput) {
 }
 
 export function serializeInspectionExport(input: InspectionExportInput): string {
-  return `${JSON.stringify(createInspectionExport(input), null, 2)}\n`;
+  const serialized = `${JSON.stringify(createInspectionExport(input), null, 2)}\n`;
+  if (new TextEncoder().encode(serialized).byteLength > MAX_INSPECTION_EXPORT_BYTES) {
+    throw new InspectionLimitError("Inspection JSON exceeds the 1 MiB export limit.");
+  }
+  return serialized;
 }
