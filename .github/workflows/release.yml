@@ -33,9 +33,9 @@ jobs:
           cache: pnpm
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
-          components: rustfmt, clippy
+          toolchain: 1.98.0
 
       - name: Install Linux Tauri dependencies
         run: |
@@ -137,8 +137,9 @@ jobs:
           cache: pnpm
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.98.0
           targets: ${{ matrix.rust_targets }}
 
       - name: Install Linux Tauri dependencies

@@ -1,0 +1,6 @@
+# Update deliberately with CI and release gate qualification; review quarterly.
+[toolchain]
+channel = "1.98.0"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"
