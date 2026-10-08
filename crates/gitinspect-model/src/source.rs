@@ -88,8 +88,14 @@ mod tests {
     #[test]
     fn imported_repository_limits_are_closed_at_boundary() {
         assert!(validate_import_limits(MAX_IMPORT_BYTES, MAX_IMPORT_OBJECTS).is_ok());
-        assert_eq!(validate_import_limits(MAX_IMPORT_BYTES + 1, 0), Err(SourceError::LimitExceeded));
-        assert_eq!(validate_import_limits(0, MAX_IMPORT_OBJECTS + 1), Err(SourceError::LimitExceeded));
+        assert_eq!(
+            validate_import_limits(MAX_IMPORT_BYTES + 1, 0),
+            Err(SourceError::LimitExceeded)
+        );
+        assert_eq!(
+            validate_import_limits(0, MAX_IMPORT_OBJECTS + 1),
+            Err(SourceError::LimitExceeded)
+        );
     }
 
     #[test]
