@@ -4,7 +4,7 @@
 
 GitInspect now has an **experimental browser/WASM boundary**, but the native Rust core is not being misrepresented as browser-ready.
 
-The first backend extraction milestone now lives in `crates/gitinspect-model`. It owns the serializable snapshot types, compact transport and append-aware delta logic, and exposes small read-only `ObjectSource` and `RefSource` traits. `gitinspect-core` re-exports the same types so native callers remain source-compatible. Both `gitinspect-model` and `gitinspect-wasm` compile for `wasm32-unknown-unknown`; this is a build qualification, **not** a working browser object database. A bounded `InMemorySource` adapter now accepts caller-supplied already-inflated object bodies and refs and implements the read-only source traits, rejecting pack/index reads. It does not yet verify object hashes or assemble commits. Git object parsing through `gix-object`/`gix-hash`, loose-object inflation, pack/index decoding, native-versus-in-memory snapshot JSON fixture equivalence, repository picker, worker import, fixture browser smoke and ~10k-commit timing remain outstanding. The demo intentionally remains synthetic until these are independently verified.
+The first backend extraction milestone now lives in `crates/gitinspect-model`. It owns the serializable snapshot types, compact transport and append-aware delta logic, and exposes small read-only `ObjectSource` and `RefSource` traits. `gitinspect-core` re-exports the same types so native callers remain source-compatible. Both `gitinspect-model` and `gitinspect-wasm` compile for `wasm32-unknown-unknown`; this is a build qualification, **not** a working browser object database. A bounded `InMemorySource` adapter now accepts caller-supplied already-inflated object bodies and refs and implements the read-only source traits, rejecting pack/index reads. It does not yet verify object hashes. An initial pure `assemble_graph` function now parses already-inflated SHA-1 commit bodies with `gix-object`/`gix-hash`, projects parent edges/author/committer data and direct refs, and enforces hard traversal bounds. **This is a partial graph projection, not a native-equivalent snapshot:** annotated-tag peeling, packed refs, tree/file metadata and native traversal ordering are not covered. Loose-object inflation, pack/index decoding, native-versus-in-memory full snapshot JSON fixture equivalence, repository picker, worker import, fixture browser smoke and ~10k-commit timing remain outstanding. The demo intentionally remains synthetic until these are independently verified.
 
 The current split is deliberate:
 
@@ -13,7 +13,7 @@ The current split is deliberate:
 | React/Three visualization | yes | yes |
 | Git Railfield / search / selection / LOD | yes | yes |
 | Rust code executing as WebAssembly | n/a | yes |
-| Real repository parsing with `gix` | yes | **no**; object/ref traits only |
+| Real repository parsing with `gix` | yes | **partial**; inflated commit parsing only, not a full repository backend |
 | Filesystem watching | yes | **no** |
 | Original-repository mutation authority | **not authorized** | **no** |
 | Browser repository source | n/a | deterministic synthetic demo |

@@ -10,3 +10,5 @@ pub use model::*;
 
 mod source;
 pub use source::*;
+mod assembly;
+pub use assembly::*;
