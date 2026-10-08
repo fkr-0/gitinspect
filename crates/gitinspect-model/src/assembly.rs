@@ -1,7 +1,7 @@
 //! Pure, bounded commit projection over caller-verified, inflated Git objects.
 //! This module deliberately has no filesystem or repository authority.
 use gix_object::bstr::ByteSlice;
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::{
     GitCommitRecord, GitRefRecord, MAX_IMPORT_OBJECTS, ObjectSource, RefKind, RefSource,
@@ -23,7 +23,47 @@ pub fn assemble_graph<S: ObjectSource + RefSource>(
     source: &S,
     max_commits: usize,
 ) -> Result<AssembledGraph, SourceError> {
-    let mut refs = source.list_refs()?;
+    let mut by_name = BTreeMap::new();
+    if let Some(packed) = source.read_packed_refs()? {
+        if packed.len() > crate::MAX_IMPORT_BYTES {
+            return Err(SourceError::LimitExceeded);
+        }
+        let mut previous = None;
+        for line in packed.split(|byte| *byte == b'\n') {
+            if line.is_empty() || line[0] == b'#' {
+                continue;
+            }
+            if line[0] == b'^' {
+                // The peeled hint is deliberately ignored: resolve and validate the tag
+                // object itself so stale or malicious hints cannot alter the graph.
+                if previous.is_none() || line.len() != 41 {
+                    return Err(SourceError::InvalidIdentifier);
+                }
+                continue;
+            }
+            let text = std::str::from_utf8(line).map_err(|_| SourceError::InvalidIdentifier)?;
+            let (oid, name) = text.split_once(' ').ok_or(SourceError::InvalidIdentifier)?;
+            crate::validate_oid(oid)?;
+            if !name.starts_with("refs/") || name.contains("..") || name.contains(['\0', '\r', ' '])
+            {
+                return Err(SourceError::InvalidIdentifier);
+            }
+            by_name.insert(name.to_owned(), oid.to_owned());
+            previous = Some(name);
+            if by_name.len() > crate::MAX_SOURCE_REFS {
+                return Err(SourceError::LimitExceeded);
+            }
+        }
+    }
+    // Loose refs override packed refs, as in Git.
+    let loose = source.list_refs()?;
+    for reference in loose {
+        by_name.insert(reference.name, reference.target);
+    }
+    let mut refs: Vec<_> = by_name
+        .into_iter()
+        .map(|(name, target)| crate::SourceRef { name, target })
+        .collect();
     if refs.len() > crate::MAX_SOURCE_REFS {
         return Err(SourceError::LimitExceeded);
     }
@@ -49,13 +89,48 @@ pub fn assemble_graph<S: ObjectSource + RefSource>(
         } else {
             RefKind::Other
         };
-        // Annotated tags are not peeled at this layer; their decoding is a separate milestone.
-        if kind != RefKind::Tag {
-            queue.push_back(reference.target.clone());
+        let mut peeled = reference.target.clone();
+        let mut visited = BTreeSet::new();
+        if kind == RefKind::Tag {
+            for _ in 0..32 {
+                if !visited.insert(peeled.clone()) {
+                    return Err(SourceError::Rejected("tag cycle".into()));
+                }
+                let Some(body) = source.read_loose_object(&peeled)? else {
+                    break;
+                };
+                if !body.starts_with(b"object ") {
+                    break;
+                }
+                let header = std::str::from_utf8(
+                    &body[..body
+                        .iter()
+                        .position(|b| *b == b'\n')
+                        .ok_or(SourceError::InvalidIdentifier)?],
+                )
+                .map_err(|_| SourceError::InvalidIdentifier)?;
+                let target = header
+                    .strip_prefix("object ")
+                    .ok_or(SourceError::InvalidIdentifier)?;
+                crate::validate_oid(target)?;
+                if !body
+                    .split(|b| *b == b'\n')
+                    .any(|line| line == b"type commit" || line == b"type tag")
+                {
+                    return Err(SourceError::Rejected(
+                        "unsupported annotated tag target".into(),
+                    ));
+                }
+                peeled = target.to_owned();
+            }
+            if visited.len() == 32 {
+                return Err(SourceError::LimitExceeded);
+            }
         }
+        queue.push_back(peeled.clone());
         records.push(GitRefRecord {
             name: reference.name,
-            target_oid: reference.target,
+            target_oid: peeled,
             kind,
             symbolic_target: None,
             upstream: None,
@@ -174,5 +249,77 @@ mod tests {
         let bounded = assemble_graph(&source, 1).unwrap();
         assert_eq!(bounded.commits.len(), 1);
         assert!(bounded.truncated);
+    }
+
+    struct PackedFixture {
+        memory: InMemorySource,
+        packed: Vec<u8>,
+    }
+    impl ObjectSource for PackedFixture {
+        fn read_loose_object(&self, oid: &str) -> Result<Option<Vec<u8>>, SourceError> {
+            self.memory.read_loose_object(oid)
+        }
+        fn read_pack_range(
+            &self,
+            id: &str,
+            offset: u64,
+            len: usize,
+        ) -> Result<Vec<u8>, SourceError> {
+            self.memory.read_pack_range(id, offset, len)
+        }
+        fn read_index(&self, id: &str) -> Result<Vec<u8>, SourceError> {
+            self.memory.read_index(id)
+        }
+    }
+    impl RefSource for PackedFixture {
+        fn list_refs(&self) -> Result<Vec<SourceRef>, SourceError> {
+            self.memory.list_refs()
+        }
+        fn read_packed_refs(&self) -> Result<Option<Vec<u8>>, SourceError> {
+            Ok(Some(self.packed.clone()))
+        }
+    }
+
+    #[test]
+    fn peels_annotated_tags_and_merges_packed_refs_with_loose_precedence() {
+        const TAG: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let tag = format!(
+            "object {CHILD}\ntype commit\ntag v1\ntagger Ada <ada@example.org> 200 +0000\n\nRelease\n"
+        );
+        let source = PackedFixture {
+            memory: InMemorySource::new(
+                [
+                    (ROOT.into(), commit(None)),
+                    (CHILD.into(), commit(Some(ROOT))),
+                    (TAG.into(), tag.into_bytes()),
+                ],
+                vec![SourceRef {
+                    name: "refs/heads/main".into(),
+                    target: CHILD.into(),
+                }],
+            )
+            .unwrap(),
+            packed: format!(
+                "# pack-refs with: peeled\n{ROOT} refs/heads/main\n{TAG} refs/tags/v1\n^{CHILD}\n"
+            )
+            .into_bytes(),
+        };
+        let graph = assemble_graph(&source, 10).unwrap();
+        assert_eq!(graph.refs.len(), 2);
+        assert_eq!(graph.refs[0].target_oid, CHILD);
+        assert_eq!(graph.refs[1].target_oid, CHILD);
+        assert_eq!(graph.commits.len(), 2);
+    }
+
+    #[test]
+    fn rejects_malformed_packed_ref_lines() {
+        let source = PackedFixture {
+            memory: InMemorySource::default(),
+            packed: b"^0123456789abcdef0123456789abcdef01234567\n".to_vec(),
+        };
+        assert_eq!(
+            assemble_graph(&source, 10).unwrap_err(),
+            SourceError::InvalidIdentifier
+        );
     }
 }
