@@ -13,3 +13,7 @@ wasm-bindgen = "=0.2.127"
 
 [lints.rust]
 unsafe_code = "forbid"
+
+# Skip the very large incremental compilation cache in dev builds.
+[profile.dev]
+incremental = false
