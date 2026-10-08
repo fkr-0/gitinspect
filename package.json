@@ -26,8 +26,8 @@
     "wasm:smoke": "node scripts/wasm-smoke.mjs"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.10",
-    "playwright-core": "1.60.0",
+    "@biomejs/biome": "^2.5.15",
+    "playwright-core": "1.63.0",
     "typescript": "7.0.2",
     "vitest": "4.1.11"
   }
