@@ -4,6 +4,25 @@ const CHILD_WORLD_PARAM = "world";
 const CHILD_TARGET_PARAM = "worldTarget";
 const CHILD_SELECTION_PARAM = "worldSelection";
 const MAX_CHILD_URL_ID_LENGTH = 4_096;
+// Identifiers are opaque, but navigation must not preserve invisible directional,
+// terminal-control, or separator-spoofing characters from hostile repositories.
+const UNSAFE_URL_ID_CHAR = /[\u200b-\u200f\u202a-\u202e\u2060-\u206f\u2044\u2215\uff0f\uff3c]/u;
+function safeId(value: unknown, maxLength: number): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= maxLength &&
+    value.trim() === value &&
+    ![...value].some((character) => {
+      const point = character.codePointAt(0) ?? 0;
+      return point <= 0x1f || (point >= 0x7f && point <= 0x9f);
+    }) &&
+    !UNSAFE_URL_ID_CHAR.test(value)
+  );
+}
+function singleParam(params: URLSearchParams, key: string): boolean {
+  return params.getAll(key).length <= 1;
+}
 const CHILD_HISTORY_STATE_KEY = "gitinspectChildNavigation";
 const CHILD_HISTORY_STATE_VERSION = 1;
 
@@ -44,6 +63,7 @@ export function childNavigationHistoryDepth(state: unknown): 1 | 2 | undefined {
   const marker = (state as Readonly<Record<string, unknown>>)[CHILD_HISTORY_STATE_KEY];
   if (typeof marker !== "object" || marker === null) return undefined;
   const record = marker as Readonly<Record<string, unknown>>;
+  if (Object.keys(record).some((key) => key !== "version" && key !== "depth")) return undefined;
   if (record.version !== CHILD_HISTORY_STATE_VERSION) return undefined;
   return record.depth === 1 || record.depth === 2 ? record.depth : undefined;
 }
@@ -51,7 +71,10 @@ export function childNavigationHistoryDepth(state: unknown): 1 | 2 | undefined {
 export function selectionFromHref(href: string): string | undefined {
   try {
     const value = new URL(href).searchParams.get(SELECTION_PARAM)?.trim();
-    return value && value.length <= MAX_SELECTION_URL_ID_LENGTH ? value : undefined;
+    return singleParam(new URL(href).searchParams, SELECTION_PARAM) &&
+      safeId(value, MAX_SELECTION_URL_ID_LENGTH)
+      ? value
+      : undefined;
   } catch {
     return undefined;
   }
@@ -60,7 +83,7 @@ export function selectionFromHref(href: string): string | undefined {
 export function hrefWithSelection(href: string, elementId: string | undefined): string {
   const url = new URL(href);
   const normalizedElementId = elementId?.trim();
-  if (normalizedElementId && normalizedElementId.length <= MAX_SELECTION_URL_ID_LENGTH) {
+  if (safeId(normalizedElementId, MAX_SELECTION_URL_ID_LENGTH)) {
     url.searchParams.set(SELECTION_PARAM, normalizedElementId);
   } else {
     url.searchParams.delete(SELECTION_PARAM);
@@ -79,6 +102,7 @@ function boundedChildId(
       readonly message: string;
     } {
   if (!params.has(key)) return { status: "missing" };
+  if (!singleParam(params, key)) return { status: "invalid", message: `${key} must occur once.` };
   const value = params.get(key)?.trim() ?? "";
   if (value.length === 0) {
     return { status: "invalid", message: `${key} must not be empty.` };
@@ -88,6 +112,9 @@ function boundedChildId(
       status: "invalid",
       message: `${key} exceeds the ${MAX_CHILD_URL_ID_LENGTH}-character child-navigation limit.`,
     };
+  }
+  if (!safeId(value, MAX_CHILD_URL_ID_LENGTH)) {
+    return { status: "invalid", message: `${key} contains unsafe characters.` };
   }
   return { status: "valid", value };
 }
@@ -101,6 +128,18 @@ export function childNavigationFromHref(href: string): ChildNavigationUrlParse {
   }
 
   const params = url.searchParams;
+  if (
+    [CHILD_WORLD_PARAM, CHILD_TARGET_PARAM, CHILD_SELECTION_PARAM].some(
+      (key) => !singleParam(params, key),
+    ) ||
+    [...params.keys()].some(
+      (key) =>
+        key.startsWith("world") &&
+        ![CHILD_WORLD_PARAM, CHILD_TARGET_PARAM, CHILD_SELECTION_PARAM].includes(key),
+    )
+  ) {
+    return { status: "invalid", message: "Duplicate or unknown child-navigation parameter." };
+  }
   const hasWorld = params.has(CHILD_WORLD_PARAM);
   const world = params.get(CHILD_WORLD_PARAM)?.trim();
   const hasTarget = params.has(CHILD_TARGET_PARAM);
@@ -151,7 +190,7 @@ export function childNavigationFromHref(href: string): ChildNavigationUrlParse {
 
   return {
     status: "invalid",
-    message: `Unsupported child-navigation world: ${world}.`,
+    message: "Unsupported child-navigation world.",
   };
 }
 
@@ -167,10 +206,9 @@ export function hrefWithChildNavigation(
   if (!state) return url.toString();
   const serializableIds =
     (state.localSelectionId === undefined ||
-      (state.localSelectionId.length > 0 &&
-        state.localSelectionId.length <= MAX_CHILD_URL_ID_LENGTH)) &&
+      safeId(state.localSelectionId, MAX_CHILD_URL_ID_LENGTH)) &&
     (state.depth === 1 ||
-      (state.fileElementId.length > 0 && state.fileElementId.length <= MAX_CHILD_URL_ID_LENGTH));
+      (state.depth === 2 && safeId(state.fileElementId, MAX_CHILD_URL_ID_LENGTH)));
   if (!serializableIds) return url.toString();
   if (state.depth === 1) {
     url.searchParams.set(CHILD_WORLD_PARAM, "commit");

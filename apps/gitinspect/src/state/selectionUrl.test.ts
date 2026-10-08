@@ -45,7 +45,9 @@ describe("selection URL state", () => {
       oversized,
     );
     expect(new URL(serialized).searchParams.has("selection")).toBe(false);
-    expect(selectionFromHref(`https://gitinspect.local/studio?selection=${oversized}`)).toBeUndefined();
+    expect(
+      selectionFromHref(`https://gitinspect.local/studio?selection=${oversized}`),
+    ).toBeUndefined();
   });
 
   it("round-trips bounded commit/file child worlds while preserving root selection and unrelated state", () => {
@@ -111,6 +113,49 @@ describe("selection URL state", () => {
       localSelectionId: "x".repeat(4_097),
     });
     expect(childNavigationFromHref(oversizedSerialized)).toEqual({ status: "none" });
+  });
+
+  it("rejects hostile and ambiguous share-link identifiers without reflecting their content", () => {
+    const root = "https://gitinspect.local/studio";
+    for (const hostile of [
+      "commit:a\u001b[31m",
+      "ref:abc\u202eexe",
+      "ref:abc\u200b",
+      "file:src\u2215evil",
+    ]) {
+      expect(selectionFromHref(hrefWithSelection(root, hostile))).toBeUndefined();
+      expect(
+        childNavigationFromHref(`${root}?world=file&worldTarget=${encodeURIComponent(hostile)}`)
+          .status,
+      ).toBe("invalid");
+      expect(
+        new URL(
+          hrefWithChildNavigation(root, { depth: 2, fileElementId: hostile }),
+        ).searchParams.has("world"),
+      ).toBe(false);
+    }
+    expect(selectionFromHref(`${root}?selection=a&selection=b`)).toBeUndefined();
+    for (const params of [
+      "?world=commit&world=commit",
+      "?world=file&worldTarget=a&worldTarget=b",
+      "?world=commit&worldSelection=a&worldSelection=b",
+      "?world=commit&worldUnexpected=__proto__",
+      "?world=constructor",
+    ]) {
+      const result = childNavigationFromHref(`${root}${params}`);
+      expect(result.status).toBe("invalid");
+      if (result.status === "invalid") expect(result.message).not.toContain("__proto__");
+    }
+    expect(
+      childNavigationHistoryDepth({
+        gitinspectChildNavigation: { version: 1, depth: 1, constructor: "evil" },
+      }),
+    ).toBeUndefined();
+    expect(
+      childNavigationHistoryDepth(
+        JSON.parse('{"gitinspectChildNavigation":{"version":1,"depth":1,"__proto__":true}}'),
+      ),
+    ).toBeUndefined();
   });
 
   it("recognizes only bounded gitinspect-owned child navigation history entries", () => {
