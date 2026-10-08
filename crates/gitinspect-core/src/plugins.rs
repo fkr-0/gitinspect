@@ -1857,11 +1857,7 @@ mod tests {
               }]
             }"#,
         );
-        symlink(
-            &outside.path,
-            fixture.path.join(".gitinspect/plugins"),
-        )
-        .unwrap();
+        symlink(&outside.path, fixture.path.join(".gitinspect/plugins")).unwrap();
 
         let error = run_plugins_for_snapshot(
             &fixture.path,
