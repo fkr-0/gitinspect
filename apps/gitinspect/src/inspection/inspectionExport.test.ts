@@ -1,24 +1,70 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  GITINSPECT_INSPECTION_EXPORT_SCHEMA,
   createInspectionExport,
-  serializeInspectionExport,
+  GITINSPECT_INSPECTION_EXPORT_SCHEMA,
   InspectionLimitError,
   parseInspectionExport,
+  serializeInspectionExport,
 } from "./inspectionExport";
 
 describe("inspection export", () => {
+  it("rejects hostile nested import properties and refuses unsafe exports", () => {
+    const base = {
+      repositoryPath: "/repo",
+      repositoryRevision: "rev",
+      navigationDepth: 0,
+      node: { id: "x", kind: "commit", properties: { safe: true } },
+    };
+    const good = JSON.parse(serializeInspectionExport(base));
+    const hostile = [
+      '{"__proto__":{"polluted":true}}',
+      JSON.stringify({ nested: Array.from({ length: 26 }).reduce<unknown>((v) => [v], "end") }),
+      JSON.stringify({ huge: "X".repeat(65537) }),
+    ];
+    for (const raw of hostile) {
+      const properties = JSON.parse(raw);
+      expect(() =>
+        parseInspectionExport(
+          JSON.stringify({ ...good, element: { ...good.element, properties } }),
+        ),
+      ).toThrow(InspectionLimitError);
+      expect(() =>
+        serializeInspectionExport({ ...base, node: { ...base.node, properties } }),
+      ).toThrow(InspectionLimitError);
+    }
+  });
+
   it("rejects unknown envelope and nested identity fields", () => {
-    const serialized = serializeInspectionExport({repositoryPath:"/repo",repositoryRevision:"rev",navigationDepth:0,node:{id:"commit:a",kind:"commit",properties:{}}});
+    const serialized = serializeInspectionExport({
+      repositoryPath: "/repo",
+      repositoryRevision: "rev",
+      navigationDepth: 0,
+      node: { id: "commit:a", kind: "commit", properties: {} },
+    });
     expect(parseInspectionExport(serialized).schema).toBe(GITINSPECT_INSPECTION_EXPORT_SCHEMA);
     const payload = JSON.parse(serialized);
-    expect(() => parseInspectionExport(JSON.stringify({...payload, execute:"danger"}))).toThrow(InspectionLimitError);
-    expect(() => parseInspectionExport(JSON.stringify({...payload, repository:{...payload.repository, execute:true}}))).toThrow(InspectionLimitError);
-    expect(() => parseInspectionExport(JSON.stringify({...payload, selection:{...payload.selection, navigationDepth:99}}))).toThrow(InspectionLimitError);
+    expect(() => parseInspectionExport(JSON.stringify({ ...payload, execute: "danger" }))).toThrow(
+      InspectionLimitError,
+    );
+    expect(() =>
+      parseInspectionExport(
+        JSON.stringify({ ...payload, repository: { ...payload.repository, execute: true } }),
+      ),
+    ).toThrow(InspectionLimitError);
+    expect(() =>
+      parseInspectionExport(
+        JSON.stringify({ ...payload, selection: { ...payload.selection, navigationDepth: 99 } }),
+      ),
+    ).toThrow(InspectionLimitError);
   });
   it("escapes HTML-breaking strings during JSON serialization", () => {
-    const output=serializeInspectionExport({repositoryPath:"/repo",repositoryRevision:"rev",navigationDepth:0,node:{id:"x",kind:"commit",label:"<script>\u202e",properties:{}}});
+    const output = serializeInspectionExport({
+      repositoryPath: "/repo",
+      repositoryRevision: "rev",
+      navigationDepth: 0,
+      node: { id: "x", kind: "commit", label: "<script>\u202e", properties: {} },
+    });
     expect(output).not.toContain("<script>");
     expect(output).toContain("\\u003cscript\\u003e");
     expect(output).toContain("\\u{202E}");

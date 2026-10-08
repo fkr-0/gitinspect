@@ -256,6 +256,9 @@ export interface GitPluginReport {
   readonly truncated: boolean;
 }
 
+export type { ParsedInspectionEnvelope } from "./inspectionValidation";
+export { parseInspectionJson } from "./inspectionValidation";
+
 export type MutationKind =
   | "branch-create"
   | "branch-delete"
