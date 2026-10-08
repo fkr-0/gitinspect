@@ -1,0 +1,49 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /crates/gitinspect-core
+    schedule:
+      interval: weekly
+    groups:
+      cargo-core-nonmajor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: cargo
+    directory: /crates/gitinspect-model
+    schedule:
+      interval: weekly
+    groups:
+      cargo-model-nonmajor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: cargo
+    directory: /crates/gitinspect-wasm
+    schedule:
+      interval: weekly
+    groups:
+      cargo-wasm-nonmajor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: cargo
+    directory: /apps/gitinspect/src-tauri
+    schedule:
+      interval: weekly
+    groups:
+      cargo-tauri-nonmajor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm-nonmajor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions-nonmajor:
+        update-types: [minor, patch]
