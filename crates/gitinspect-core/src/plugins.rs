@@ -1030,6 +1030,57 @@ fn validate_plugin_id(id: &str) -> Result<(), PluginError> {
     Ok(())
 }
 
+fn validate_plugin_root(
+    repository_root: &Path,
+    plugin_root: &Path,
+) -> Result<PathBuf, PluginError> {
+    let relative = plugin_root.strip_prefix(repository_root).map_err(|_| {
+        PluginError::Config(format!(
+            "plugin directory escaped repository root: {}",
+            plugin_root.display()
+        ))
+    })?;
+
+    let mut current = repository_root.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(segment) = component else {
+            return Err(PluginError::Config(format!(
+                "plugin directory contains an invalid path component: {}",
+                plugin_root.display()
+            )));
+        };
+        current.push(segment);
+        let metadata = fs::symlink_metadata(&current).map_err(|source| PluginError::Io {
+            path: current.clone(),
+            source,
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(PluginError::Config(format!(
+                "plugin directory components must not be symlinks: {}",
+                current.display()
+            )));
+        }
+    }
+
+    let canonical_repository_root =
+        fs::canonicalize(repository_root).map_err(|source| PluginError::Io {
+            path: repository_root.to_path_buf(),
+            source,
+        })?;
+    let canonical_plugin_root =
+        fs::canonicalize(plugin_root).map_err(|source| PluginError::Io {
+            path: plugin_root.to_path_buf(),
+            source,
+        })?;
+    if !canonical_plugin_root.starts_with(&canonical_repository_root) {
+        return Err(PluginError::Config(format!(
+            "plugin directory must stay inside the repository: {}",
+            plugin_root.display()
+        )));
+    }
+    Ok(canonical_plugin_root)
+}
+
 fn discover_manifests(
     repository_root: &Path,
     config: &PluginConfig,
@@ -1038,15 +1089,21 @@ fn discover_manifests(
     let plugin_root = repository_root.join(PLUGIN_DIR);
     let mut requested = BTreeMap::<PathBuf, Option<String>>::new();
 
-    if plugin_root.is_dir() {
-        let mut entries = fs::read_dir(&plugin_root)
+    if plugin_root.exists() {
+        let validated_plugin_root = validate_plugin_root(repository_root, &plugin_root)?;
+        if !validated_plugin_root.is_dir() {
+            return Err(PluginError::Config(format!(
+                "{PLUGIN_DIR} must be a directory"
+            )));
+        }
+        let mut entries = fs::read_dir(&validated_plugin_root)
             .map_err(|source| PluginError::Io {
-                path: plugin_root.clone(),
+                path: validated_plugin_root.clone(),
                 source,
             })?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|source| PluginError::Io {
-                path: plugin_root.clone(),
+                path: validated_plugin_root.clone(),
                 source,
             })?;
         entries.sort_by_key(|entry| entry.file_name());
@@ -1134,10 +1191,7 @@ fn load_manifest(
         )));
     }
 
-    let canonical_root = fs::canonicalize(plugin_root).map_err(|source| PluginError::Io {
-        path: plugin_root.to_path_buf(),
-        source,
-    })?;
+    let canonical_root = validate_plugin_root(repository_root, plugin_root)?;
     let canonical_path = fs::canonicalize(path).map_err(|source| PluginError::Io {
         path: path.to_path_buf(),
         source,
@@ -1737,6 +1791,89 @@ mod tests {
                 .findings
                 .iter()
                 .any(|finding| finding.rule_id == "manifest-diff")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_plugin_parent_cannot_escape_repository() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = Fixture::new();
+        let outside = Fixture::new();
+        outside.write(
+            "plugins/escaped.json",
+            r#"{
+              "schemaVersion": 1,
+              "id": "escaped",
+              "name": "Escaped plugin",
+              "rules": [{
+                "id": "one",
+                "source": "file",
+                "field": "path",
+                "operator": "contains",
+                "value": "src/",
+                "message": "{path}"
+              }]
+            }"#,
+        );
+        symlink(&outside.path, fixture.path.join(".gitinspect")).unwrap();
+
+        let error = run_plugins_for_snapshot(
+            &fixture.path,
+            &snapshot(),
+            &PluginRunOptions::default(),
+            Some(1_700_000_000_000),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("plugin directory components must not be symlinks")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_plugin_directory_cannot_escape_repository() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = Fixture::new();
+        let outside = Fixture::new();
+        fs::create_dir_all(fixture.path.join(".gitinspect")).unwrap();
+        outside.write(
+            "escaped.json",
+            r#"{
+              "schemaVersion": 1,
+              "id": "escaped",
+              "name": "Escaped plugin",
+              "rules": [{
+                "id": "one",
+                "source": "repository",
+                "field": "revision",
+                "operator": "equals",
+                "value": "rev-1",
+                "message": "{value}"
+              }]
+            }"#,
+        );
+        symlink(
+            &outside.path,
+            fixture.path.join(".gitinspect/plugins"),
+        )
+        .unwrap();
+
+        let error = run_plugins_for_snapshot(
+            &fixture.path,
+            &snapshot(),
+            &PluginRunOptions::default(),
+            Some(1_700_000_000_000),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("plugin directory components must not be symlinks")
         );
     }
 
