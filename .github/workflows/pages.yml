@@ -43,6 +43,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.0
+          targets: wasm32-unknown-unknown
 
       - name: Install JavaScript dependencies
         run: pnpm install --frozen-lockfile

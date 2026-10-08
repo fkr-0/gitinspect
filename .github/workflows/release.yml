@@ -36,6 +36,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.0
+          components: rustfmt, clippy
 
       - name: Install Linux Tauri dependencies
         run: |
