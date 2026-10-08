@@ -5,9 +5,24 @@ import {
   createInspectionExport,
   serializeInspectionExport,
   InspectionLimitError,
+  parseInspectionExport,
 } from "./inspectionExport";
 
 describe("inspection export", () => {
+  it("rejects unknown envelope and nested identity fields", () => {
+    const serialized = serializeInspectionExport({repositoryPath:"/repo",repositoryRevision:"rev",navigationDepth:0,node:{id:"commit:a",kind:"commit",properties:{}}});
+    expect(parseInspectionExport(serialized).schema).toBe(GITINSPECT_INSPECTION_EXPORT_SCHEMA);
+    const payload = JSON.parse(serialized);
+    expect(() => parseInspectionExport(JSON.stringify({...payload, execute:"danger"}))).toThrow(InspectionLimitError);
+    expect(() => parseInspectionExport(JSON.stringify({...payload, repository:{...payload.repository, execute:true}}))).toThrow(InspectionLimitError);
+    expect(() => parseInspectionExport(JSON.stringify({...payload, selection:{...payload.selection, navigationDepth:99}}))).toThrow(InspectionLimitError);
+  });
+  it("escapes HTML-breaking strings during JSON serialization", () => {
+    const output=serializeInspectionExport({repositoryPath:"/repo",repositoryRevision:"rev",navigationDepth:0,node:{id:"x",kind:"commit",label:"<script>\u202e",properties:{}}});
+    expect(output).not.toContain("<script>");
+    expect(output).toContain("\\u003cscript\\u003e");
+    expect(output).toContain("\\u{202E}");
+  });
   it("rejects excessive navigation depth and oversized Unicode JSON rather than truncating", () => {
     const base = {
       repositoryPath: "/repo",

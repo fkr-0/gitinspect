@@ -12,6 +12,7 @@ import type {
 } from "@gitinspect/graph-elements";
 
 import { gitGraphIds } from "./graphAdapter";
+import { sanitizeRepositoryDisplay } from "./displaySanitization";
 import {
   gitTopologyFocusLevel,
   type GitTopologyContext,
@@ -423,7 +424,7 @@ function simpleNodeDescriptor(node: GraphNodeRecord, theme: GitVisualTheme): Nod
     id: `${node.id}:label`,
     primitive: "label",
     position: [0, 1.05, 0],
-    label: node.label ?? node.id,
+    label: sanitizeRepositoryDisplay(node.label ?? node.id),
     interactionKey,
     metadata: { role: "node-label", kind: node.kind },
   });

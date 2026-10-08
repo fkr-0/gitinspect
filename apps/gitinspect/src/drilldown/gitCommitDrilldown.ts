@@ -131,7 +131,7 @@ function parentNodes(snapshot: GitRepositorySnapshot, commit: GitCommitRecord): 
     return {
       id: `${PARENT_PREFIX}${oid}`,
       kind: "commit-parent-context",
-      label: parent ? firstLine(parent.message) : `${oid.slice(0, 10)}…`,
+      label: parent ? sanitizeRepositoryDisplay(firstLine(parent.message)) : `${oid.slice(0, 10)}…`,
       group: "parent-context",
       positionHint: [-8, 2 - index * 4, 0],
       properties: {
@@ -150,7 +150,7 @@ function contextRefNodes(snapshot: GitRepositorySnapshot, oid: string): GraphNod
     .map((ref, index) => ({
       id: `${CONTEXT_REF_PREFIX}${encodeURIComponent(ref.name)}`,
       kind: `context-${ref.kind}`,
-      label: ref.name.replace(/^refs\/(heads|remotes|tags)\//, ""),
+      label: sanitizeRepositoryDisplay(ref.name.replace(/^refs\/(heads|remotes|tags)\//, "")),
       group: "ref-context",
       positionHint: [8, 3 - index * 3, 0],
       properties: {
@@ -228,7 +228,7 @@ export function commitFileDetailToDrilldownDataset(
   const core: GraphNodeRecord = {
     id: coreId,
     kind: "file-detail-core",
-    label: detail.path,
+    label: sanitizeRepositoryDisplay(detail.path),
     group: `file:${detail.status}`,
     weight: 3,
     positionHint: [0, 0, 0],
