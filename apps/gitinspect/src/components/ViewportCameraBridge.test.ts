@@ -5,9 +5,31 @@ import {
   applyViewportCameraIntent,
   applyViewportTopologyFit,
   cameraProjectionSampleChanged,
+  observeReducedMotion,
 } from "./ViewportCameraBridge";
 
 describe("ViewportCameraBridge controller integration", () => {
+  it("observes reduced-motion preference changes immediately and unregisters on teardown", () => {
+    const events = new EventTarget();
+    let matches = false;
+    const query = {
+      get matches() {
+        return matches;
+      },
+      addEventListener: events.addEventListener.bind(events),
+      removeEventListener: events.removeEventListener.bind(events),
+    } as Pick<MediaQueryList, "matches" | "addEventListener" | "removeEventListener">;
+    const observed: boolean[] = [];
+    const stop = observeReducedMotion(query, (reduced) => observed.push(reduced));
+    matches = true;
+    events.dispatchEvent(new Event("change"));
+    matches = false;
+    events.dispatchEvent(new Event("change"));
+    stop();
+    matches = true;
+    events.dispatchEvent(new Event("change"));
+    expect(observed).toEqual([false, true, false]);
+  });
   it("keeps LOD camera replanning bounded by a world-distance sample threshold", () => {
     expect(cameraProjectionSampleChanged([0, 0, 0], [7.9, 0, 0])).toBe(false);
     expect(cameraProjectionSampleChanged([0, 0, 0], [8, 0, 0])).toBe(true);

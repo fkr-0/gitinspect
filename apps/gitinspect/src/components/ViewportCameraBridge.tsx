@@ -9,10 +9,7 @@ import type {
   Vec3,
 } from "@gitinspect/graph-elements";
 
-import {
-  fitGitCameraToBounds,
-  type GitCameraFitBounds,
-} from "./gitCameraFit";
+import { fitGitCameraToBounds, type GitCameraFitBounds } from "./gitCameraFit";
 import {
   type ViewportDiagnosticHandler,
   viewportDiagnosticEnvironment,
@@ -29,6 +26,16 @@ export interface ViewportCameraIntent {
   readonly nodePositions: ReadonlyMap<ElementId, Vec3>;
 }
 
+export function observeReducedMotion(
+  query: Pick<MediaQueryList, "matches" | "addEventListener" | "removeEventListener">,
+  onChange: (reduced: boolean) => void,
+): () => void {
+  const update = () => onChange(query.matches);
+  query.addEventListener("change", update);
+  update();
+  return () => query.removeEventListener("change", update);
+}
+
 export function applyViewportTopologyFit(
   controller: CameraController,
   request: ViewportTopologyFitRequest,
@@ -37,9 +44,7 @@ export function applyViewportTopologyFit(
   pointerMode: MouseMode,
 ): CameraState {
   const target =
-    request.targetElementId === undefined
-      ? undefined
-      : nodePositions.get(request.targetElementId);
+    request.targetElementId === undefined ? undefined : nodePositions.get(request.targetElementId);
   const fitted = fitGitCameraToBounds(request.bounds, viewportAspect, {
     ...(target === undefined ? {} : { target }),
     ...(target === undefined || request.targetElementId === undefined
@@ -58,6 +63,7 @@ export interface ViewportTopologyFitRequest {
 }
 
 interface ViewportCameraBridgeProps extends ViewportCameraIntent {
+  readonly recoveryAttempt?: number;
   readonly controller: CameraController;
   readonly cameraState: CameraState;
   readonly topologyFit?: ViewportTopologyFitRequest;
@@ -127,6 +133,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 export function ViewportCameraBridge({
+  recoveryAttempt,
   controller,
   cameraState,
   cameraMode,
@@ -144,6 +151,23 @@ export function ViewportCameraBridge({
   const lastPointerRef = useRef<[number, number] | undefined>(undefined);
   const lastTopologyFitKeyRef = useRef<string | undefined>(undefined);
   const diagnosticFrameCountRef = useRef(0);
+  const reducedMotionRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    return observeReducedMotion(query, (reduced) => {
+      reducedMotionRef.current = reduced;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (recoveryAttempt === undefined || recoveryAttempt === 0) return;
+    const restored = controller.snapshot();
+    camera.position.set(...restored.position);
+    camera.lookAt(...restored.target);
+    onCameraStateChange(restored);
+  }, [camera, controller, onCameraStateChange, recoveryAttempt]);
 
   useEffect(() => {
     diagnosticFrameCountRef.current = 0;
@@ -371,11 +395,15 @@ export function ViewportCameraBridge({
         : [0, 0, 0];
     const look = pendingLookRef.current;
     pendingLookRef.current = [0, 0];
-    const snapshot = controller.tick(Math.min(Math.max(deltaSeconds, 0), 0.1), {
-      movement,
-      look: [look[0], look[1]],
-      speedScale: keys.has("ShiftLeft") || keys.has("ShiftRight") ? 3 : 1,
-    });
+    const reduced = reducedMotionRef.current;
+    const snapshot = controller.tick(
+      reduced && cameraMode === "attached" ? 1_000_000 : Math.min(Math.max(deltaSeconds, 0), 0.1),
+      {
+        movement,
+        look: [look[0], look[1]],
+        speedScale: keys.has("ShiftLeft") || keys.has("ShiftRight") ? 3 : 1,
+      },
+    );
 
     camera.position.set(...snapshot.position);
     camera.lookAt(...snapshot.target);
