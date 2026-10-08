@@ -16,6 +16,17 @@ interface State {
   readonly error?: Error | undefined;
 }
 
+/** External runtime errors may contain repository paths or sensitive data. */
+export function safeRuntimeErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) return "Unexpected runtime error.";
+  if (/webgl|context lost/i.test(error.message))
+    return "WebGL is unavailable or its context was lost.";
+  if (/webassembly|wasm|instantiate/i.test(error.message))
+    return "The WebAssembly runtime could not initialize.";
+  if (/clipboard/i.test(error.message)) return "Clipboard access is unavailable.";
+  return "Unexpected runtime error.";
+}
+
 /** A feature failure must never reveal stack traces or repository content. */
 export class RuntimeErrorBoundary extends Component<Props, State> {
   state: State = {};
@@ -31,7 +42,7 @@ export class RuntimeErrorBoundary extends Component<Props, State> {
         version,
         wasmApiVersion,
         capabilities,
-        error: this.state.error?.message.slice(0, 512) ?? "Unknown error",
+        error: safeRuntimeErrorMessage(this.state.error),
       },
       null,
       2,
@@ -48,7 +59,7 @@ export class RuntimeErrorBoundary extends Component<Props, State> {
     return (
       <section role="alert" className="wasm-boot wasm-boot--error">
         <h2>{this.props.feature} failed</h2>
-        <p>{this.state.error.message}</p>
+        <p>{safeRuntimeErrorMessage(this.state.error)}</p>
         <p>Retry this feature or reload the application.</p>
         <button type="button" onClick={() => this.setState({ error: undefined })}>
           Retry
