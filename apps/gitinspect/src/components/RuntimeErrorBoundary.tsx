@@ -13,7 +13,7 @@ interface Props {
 }
 
 interface State {
-  readonly error?: Error;
+  readonly error?: Error | undefined;
 }
 
 /** A feature failure must never reveal stack traces or repository content. */

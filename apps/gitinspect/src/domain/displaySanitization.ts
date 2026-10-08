@@ -1,4 +1,5 @@
 /** Repository-originated text is data, never markup or terminal instructions. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the purpose of this pattern; they are escaped, never rendered.
 const UNSAFE_FORMAT = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\u2215\u2044\uff0f\uff3c]/gu;
 const MAX_DISPLAY_CODEPOINTS = 240;
 

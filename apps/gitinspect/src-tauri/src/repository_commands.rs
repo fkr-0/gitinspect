@@ -28,11 +28,25 @@ mod inspection_path_security_tests {
     #[test]
     fn rejects_hostile_inspection_paths() {
         for hostile in [
-            "", "../secret", "a/../secret", "./a", "a//b", "/etc/passwd",
-            "C:/Windows", "C:\\Windows", "\\\\server\\share", "a\\b", "a\0b",
-            "a\nsecret", ".", "..",
+            "",
+            "../secret",
+            "a/../secret",
+            "./a",
+            "a//b",
+            "/etc/passwd",
+            "C:/Windows",
+            "C:\\Windows",
+            "\\\\server\\share",
+            "a\\b",
+            "a\0b",
+            "a\nsecret",
+            ".",
+            "..",
         ] {
-            assert!(validate_inspection_path(hostile).is_err(), "accepted hostile path");
+            assert!(
+                validate_inspection_path(hostile).is_err(),
+                "accepted hostile path"
+            );
         }
         assert!(validate_inspection_path(&"x".repeat(4097)).is_err());
     }
@@ -46,10 +60,17 @@ mod inspection_path_security_tests {
 
 /// Only repository-relative Git paths are accepted for lazy file inspection.
 fn validate_inspection_path(path: &str) -> Result<(), String> {
-    if path.is_empty() || path.len() > 4096 || path.starts_with('/') || path.starts_with('\\')
-        || path.contains('\\') || path.contains('\0') || path.chars().any(char::is_control)
+    if path.is_empty()
+        || path.len() > 4096
+        || path.starts_with('/')
+        || path.starts_with('\\')
+        || path.contains('\\')
+        || path.contains('\0')
+        || path.chars().any(char::is_control)
         || path.as_bytes().get(1) == Some(&b':')
-        || path.split('/').any(|segment| segment.is_empty() || segment == "." || segment == "..")
+        || path
+            .split('/')
+            .any(|segment| segment.is_empty() || segment == "." || segment == "..")
     {
         return Err("invalid repository-relative inspection path".into());
     }
