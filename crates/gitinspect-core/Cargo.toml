@@ -7,7 +7,7 @@ publish = false
 
 [dependencies]
 gitinspect-model = { path = "../gitinspect-model" }
-gix = { version = "0.86.0", features = ["blob-diff", "revision"] }
+gix = { version = "0.88.0", features = ["blob-diff", "revision"] }
 notify = "8.2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
