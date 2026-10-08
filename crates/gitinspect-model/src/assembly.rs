@@ -17,50 +17,6 @@ pub struct AssembledGraph {
     pub truncated: bool,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{InMemorySource, SourceRef};
-
-    const ROOT: &str = "0123456789abcdef0123456789abcdef01234567";
-    const CHILD: &str = "fedcba9876543210fedcba9876543210fedcba98";
-
-    fn commit(parent: Option<&str>) -> Vec<u8> {
-        let mut body = format!("tree {ROOT}\n");
-        if let Some(parent) = parent {
-            body.push_str(&format!("parent {parent}\n"));
-        }
-        body.push_str("author Ada <ada@example.org> 100 +0000\ncommitter Bob <bob@example.org> 200 +0000\n\nA test commit\n");
-        body.into_bytes()
-    }
-
-    #[test]
-    fn assembles_parent_edges_and_metadata_without_filesystem() {
-        let source = InMemorySource::new(
-            [
-                (ROOT.into(), commit(None)),
-                (CHILD.into(), commit(Some(ROOT))),
-            ],
-            vec![SourceRef {
-                name: "refs/heads/main".into(),
-                target: CHILD.into(),
-            }],
-        )
-        .unwrap();
-        let graph = assemble_graph(&source, 10).unwrap();
-        assert_eq!(graph.commits.len(), 2);
-        assert_eq!(graph.commits[0].oid, CHILD);
-        assert_eq!(graph.commits[0].parents, [ROOT]);
-        assert_eq!(graph.commits[0].author_name, "Ada");
-        assert_eq!(graph.commits[0].committed_at_ms, 200_000);
-        assert_eq!(graph.refs[0].kind, RefKind::LocalBranch);
-        assert!(!graph.truncated);
-        let bounded = assemble_graph(&source, 1).unwrap();
-        assert_eq!(bounded.commits.len(), 1);
-        assert!(bounded.truncated);
-    }
-}
-
 /// Traverse commit parents without allocating more than `max_commits` records.
 /// The caller supplies inflated object bodies; loose/pack decompression is a separate layer.
 pub fn assemble_graph<S: ObjectSource + RefSource>(
@@ -175,4 +131,48 @@ pub fn assemble_graph<S: ObjectSource + RefSource>(
         refs: records,
         truncated,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{InMemorySource, SourceRef};
+
+    const ROOT: &str = "0123456789abcdef0123456789abcdef01234567";
+    const CHILD: &str = "fedcba9876543210fedcba9876543210fedcba98";
+
+    fn commit(parent: Option<&str>) -> Vec<u8> {
+        let mut body = format!("tree {ROOT}\n");
+        if let Some(parent) = parent {
+            body.push_str(&format!("parent {parent}\n"));
+        }
+        body.push_str("author Ada <ada@example.org> 100 +0000\ncommitter Bob <bob@example.org> 200 +0000\n\nA test commit\n");
+        body.into_bytes()
+    }
+
+    #[test]
+    fn assembles_parent_edges_and_metadata_without_filesystem() {
+        let source = InMemorySource::new(
+            [
+                (ROOT.into(), commit(None)),
+                (CHILD.into(), commit(Some(ROOT))),
+            ],
+            vec![SourceRef {
+                name: "refs/heads/main".into(),
+                target: CHILD.into(),
+            }],
+        )
+        .unwrap();
+        let graph = assemble_graph(&source, 10).unwrap();
+        assert_eq!(graph.commits.len(), 2);
+        assert_eq!(graph.commits[0].oid, CHILD);
+        assert_eq!(graph.commits[0].parents, [ROOT]);
+        assert_eq!(graph.commits[0].author_name, "Ada");
+        assert_eq!(graph.commits[0].committed_at_ms, 200_000);
+        assert_eq!(graph.refs[0].kind, RefKind::LocalBranch);
+        assert!(!graph.truncated);
+        let bounded = assemble_graph(&source, 1).unwrap();
+        assert_eq!(bounded.commits.len(), 1);
+        assert!(bounded.truncated);
+    }
 }
