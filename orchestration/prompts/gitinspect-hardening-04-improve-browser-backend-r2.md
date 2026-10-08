@@ -27,3 +27,18 @@ CI builds the wasm crates for `wasm32-unknown-unknown`; a native-vs-wasm equival
 `crates/gitinspect-model/**` (new), `crates/gitinspect-wasm/**`, the minimal extraction edits in `crates/gitinspect-core/src/{model,delta,compact}.rs` and `lib.rs`, WASM entry and an import component under `apps/gitinspect/src/`, `docs/WEBASSEMBLY.md`. Do not touch mutation modules or `plugins.rs`.
 
 Commit meaningful scoped slices locally (small, conventional messages). Do not edit `CHANGELOG.md`; post the commits, checks run, evidence and a proposed `## Unreleased` bullet to `.wsbridge:gitinspect`. At handoff (the legacy `prolong lock/unlock` commands are retired and do nothing): write a namespaced checkpoint to `.ws-bridge/agent-checkpoints/` named after your OCP task id (for example GITINSPECT-HARDEN-04-WASM-BACKEND-R2-20261008.json) (status, summary, commit hashes, checks run, artifacts, nextSteps, followUpTasks) and submit the typed phase result for your OCP task through the ws-bridge workflow tools. Say plainly if the work is partial or blocked; never report completion you have not verified. Do not dispatch another continuation unless coordinated.
+
+## Resume context (round 2) — read before acting
+
+This is a continuation of OCP task `GITINSPECT-HARDEN-04-WASM-BACKEND-20261008`, which stopped with status `blocked`. Its checkpoint is `.ws-bridge/agent-checkpoints/GITINSPECT-HARDEN-04-WASM-BACKEND-20261008.json`; read it and `git log` first and **do not redo work already committed**.
+
+Previous summary: Partial native/WASM-compatible model extraction committed as d5b1409 and truthful docs as ed99637. The requested real browser repository backend is not implemented; synthetic demo remains. No permission to mutate originals. Legacy prolong lock/unlock command retired; checkpoint stored in active ws-bridge instead.
+
+Prior artifacts: d5b1409, ed99637, crates/gitinspect-model/src/source.rs, docs/WEBASSEMBLY.md
+
+Remaining work recorded by the previous round:
+- Implement bounded native and browser adapters for ObjectSource and RefSource, including loose Git object and pack/index parsing via browser-compatible gix-* crates.
+- Wire worker-isolated user-selected .git directory read, snapshot construction, versioned WASM API and viewport service; retain demo until verified.
+- Add fixture native/WASM equivalence, browser smoke and ~10k-commit timing; preserve concurrent changes and task identity.
+
+Environment is now healthy: `main` is green in CI at ef572bc+ (typecheck, lint, 227 tests, rustfmt on all four Rust crates), the shared `node_modules` was rebuilt from the frozen lockfile with a single R3F copy, and the earlier TypeScript/Biome/rustfmt blockers were fixed. If a gate fails, first check whether it also fails on a clean frozen-lockfile install before reporting it as a blocker. Local commits are preferred, but finish by pushing nothing: the coordinator pushes after CI review.

@@ -23,3 +23,18 @@ A fixture repository (generated in a repo-local temp dir) with malicious refs, c
 `apps/gitinspect/src/{domain,services,drilldown}/**`, `packages/contracts/**`, `apps/gitinspect/src-tauri/{src,capabilities}/**`, new sanitisation module + tests, `crates/gitinspect-core/src/{repository,diff,model}.rs` argument validation only. Coordinate on `plugins.rs` with the hardening prompt (02): do not edit it.
 
 Commit meaningful scoped slices locally (small, conventional messages). Do not edit `CHANGELOG.md`; post the commits, checks run, evidence and a proposed `## Unreleased` bullet to `.wsbridge:gitinspect`. At handoff (the legacy `prolong lock/unlock` commands are retired and do nothing): write a namespaced checkpoint to `.ws-bridge/agent-checkpoints/` named after your OCP task id (for example GITINSPECT-HARDEN-04-WASM-BACKEND-R2-20261008.json) (status, summary, commit hashes, checks run, artifacts, nextSteps, followUpTasks) and submit the typed phase result for your OCP task through the ws-bridge workflow tools. Say plainly if the work is partial or blocked; never report completion you have not verified. Do not dispatch another continuation unless coordinated.
+
+## Resume context (round 2) — read before acting
+
+This is a continuation of OCP task `GITINSPECT-HARDEN-03-SANITIZE-20261008`, which stopped with status `in_progress`. Its checkpoint is `.ws-bridge/agent-checkpoints/GITINSPECT-HARDEN-03-SANITIZE-20261008.json`; read it and `git log` first and **do not redo work already committed**.
+
+Previous summary: Local commit 33e1e6d; 18 focused Vitest tests passed; Rust test blocked by concurrent rustup installation conflict; broader hostile-data pipeline and strict export/import validation outstanding.
+
+Prior artifacts: 33e1e6d1f29e25d095d4ec8850e42ad47b947edd, apps/gitinspect/src/domain/displaySanitization.ts, apps/gitinspect/src-tauri/src/repository_commands.rs
+
+Remaining work recorded by the previous round:
+- Re-run Rust targeted inspection_path_security_tests once toolchain is stable.
+- Extend sink coverage to inspector, search, React/three.js labels, deep-link parser and strict inspection JSON import/schema; preserve concurrent inspectionExport edits.
+- Generate hostile fixture repo and DOM/export regression evidence; audit log redaction and command argument validation.
+
+Environment is now healthy: `main` is green in CI at ef572bc+ (typecheck, lint, 227 tests, rustfmt on all four Rust crates), the shared `node_modules` was rebuilt from the frozen lockfile with a single R3F copy, and the earlier TypeScript/Biome/rustfmt blockers were fixed. If a gate fails, first check whether it also fails on a clean frozen-lockfile install before reporting it as a blocker. Local commits are preferred, but finish by pushing nothing: the coordinator pushes after CI review.

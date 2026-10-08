@@ -23,3 +23,19 @@ Tests per bullet (vitest + cargo), a short table of limits introduced with their
 `apps/gitinspect/src/{state,inspection,components}/**` (new error-boundary files and limits modules only), `apps/gitinspect/wasm.html` + wasm entry, `crates/gitinspect-core/src/plugins.rs` and `crates/gitinspect-core/tests/**`, CSP in `apps/gitinspect/src-tauri/tauri.conf.json`. Not `vite*.ts`/lockfile/`pages.yml` (the duplicate-R3F crash is already fixed in 34e8096; keep `scripts/check-single-r3f.mjs` and `scripts/wasm-smoke.mjs` passing) or Tauri capability files (prompt 03).
 
 Commit meaningful scoped slices locally (small, conventional messages). Do not edit `CHANGELOG.md`; post the commits, checks run, evidence and a proposed `## Unreleased` bullet to `.wsbridge:gitinspect`. At handoff (the legacy `prolong lock/unlock` commands are retired and do nothing): write a namespaced checkpoint to `.ws-bridge/agent-checkpoints/` named after your OCP task id (for example GITINSPECT-HARDEN-04-WASM-BACKEND-R2-20261008.json) (status, summary, commit hashes, checks run, artifacts, nextSteps, followUpTasks) and submit the typed phase result for your OCP task through the ws-bridge workflow tools. Say plainly if the work is partial or blocked; never report completion you have not verified. Do not dispatch another continuation unless coordinated.
+
+## Resume context (round 2) — read before acting
+
+This is a continuation of OCP task `GITINSPECT-HARDEN-02-RUNTIME-20261008`, which stopped with status `blocked`. Its checkpoint is `.ws-bridge/agent-checkpoints/GITINSPECT-HARDEN-02-RUNTIME-20261008.json`; read it and `git log` first and **do not redo work already committed**.
+
+Previous summary: Partial hardening committed 0df3ffe; integration blocked by concurrent wasmMain claim, baseline typecheck/lint failures; full requested acceptance not complete.
+
+Prior artifacts: 0df3ffe, apps/gitinspect/src/inspection/inspectionExport.ts, apps/gitinspect/src/components/RuntimeErrorBoundary.tsx, apps/gitinspect/wasm.html, apps/gitinspect/src-tauri/tauri.conf.json
+
+Remaining work recorded by the previous round:
+- Coordinate wasmMain.tsx with HARDEN-04 before wiring browser boundary.
+- Add per-feature error boundaries, WebGL recovery and reduced-motion behavior.
+- Complete adversarial Rust plugin tests and typed bounds for search/deep-link/descriptors.
+- Collect failure screenshots, fix/coordinate global check failures, rerun complete gates.
+
+Environment is now healthy: `main` is green in CI at ef572bc+ (typecheck, lint, 227 tests, rustfmt on all four Rust crates), the shared `node_modules` was rebuilt from the frozen lockfile with a single R3F copy, and the earlier TypeScript/Biome/rustfmt blockers were fixed. If a gate fails, first check whether it also fails on a clean frozen-lockfile install before reporting it as a blocker. Local commits are preferred, but finish by pushing nothing: the coordinator pushes after CI review.
