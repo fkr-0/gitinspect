@@ -10,6 +10,19 @@ pub const MAX_PACK_RANGE_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_LOOSE_OBJECT_BYTES: usize = 8 * 1024 * 1024;
 /// Upper limit on imported refs, prior to graph assembly.
 pub const MAX_SOURCE_REFS: usize = 100_000;
+/// Maximum bytes accepted in a single browser import batch (128 MiB).
+pub const MAX_IMPORT_BYTES: usize = 128 * 1024 * 1024;
+/// Maximum number of object records accepted in a browser import batch.
+pub const MAX_IMPORT_OBJECTS: usize = 100_000;
+
+/// Validate aggregate byte/object counts before browser adapters allocate memory.
+pub fn validate_import_limits(bytes: usize, objects: usize) -> Result<(), SourceError> {
+    if bytes > MAX_IMPORT_BYTES || objects > MAX_IMPORT_OBJECTS {
+        Err(SourceError::LimitExceeded)
+    } else {
+        Ok(())
+    }
+}
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SourceError {
@@ -72,6 +85,13 @@ pub fn validate_range(offset: u64, len: usize) -> Result<(), SourceError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn imported_repository_limits_are_closed_at_boundary() {
+        assert!(validate_import_limits(MAX_IMPORT_BYTES, MAX_IMPORT_OBJECTS).is_ok());
+        assert_eq!(validate_import_limits(MAX_IMPORT_BYTES + 1, 0), Err(SourceError::LimitExceeded));
+        assert_eq!(validate_import_limits(0, MAX_IMPORT_OBJECTS + 1), Err(SourceError::LimitExceeded));
+    }
+
     #[test]
     fn rejects_paths_and_oversized_ranges() {
         assert_eq!(
