@@ -21,6 +21,41 @@ pub struct RepositoryPathSelection {
     pub expected_kind: Option<String>,
 }
 
+#[cfg(test)]
+mod inspection_path_security_tests {
+    use super::validate_inspection_path;
+
+    #[test]
+    fn rejects_hostile_inspection_paths() {
+        for hostile in [
+            "", "../secret", "a/../secret", "./a", "a//b", "/etc/passwd",
+            "C:/Windows", "C:\\Windows", "\\\\server\\share", "a\\b", "a\0b",
+            "a\nsecret", ".", "..",
+        ] {
+            assert!(validate_inspection_path(hostile).is_err(), "accepted hostile path");
+        }
+        assert!(validate_inspection_path(&"x".repeat(4097)).is_err());
+    }
+
+    #[test]
+    fn accepts_normal_relative_repo_paths() {
+        assert!(validate_inspection_path("src/main.rs").is_ok());
+        assert!(validate_inspection_path("docs/read me.md").is_ok());
+    }
+}
+
+/// Only repository-relative Git paths are accepted for lazy file inspection.
+fn validate_inspection_path(path: &str) -> Result<(), String> {
+    if path.is_empty() || path.len() > 4096 || path.starts_with('/') || path.starts_with('\\')
+        || path.contains('\\') || path.contains('\0') || path.chars().any(char::is_control)
+        || path.as_bytes().get(1) == Some(&b':')
+        || path.split('/').any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        return Err("invalid repository-relative inspection path".into());
+    }
+    Ok(())
+}
+
 #[tauri::command(rename_all = "camelCase")]
 pub fn refresh_repository_compact_delta(
     repository_id: String,
@@ -414,6 +449,7 @@ impl RepositoryAuthority {
         path: &str,
         options: Option<FileDetailOptions>,
     ) -> Result<CommitFileDetail, String> {
+        validate_inspection_path(path)?;
         let handle = self.handle(repository_id)?;
         handle
             .commit_file_detail(oid, path, bounded_file_detail_options(options))

@@ -14,6 +14,7 @@ import type {
 } from "@gitinspect/graph-elements";
 
 import { GitCommitDiffCache } from "../inspection/gitCommitDiffCache";
+import { sanitizeRepositoryDisplay } from "../domain/displaySanitization";
 import type { RepositoryService, RepositorySession } from "../services/repository";
 
 const ROOT_COMMIT_PREFIX = "commit:";
@@ -80,7 +81,7 @@ function commitNode(commit: GitCommitRecord): GraphNodeRecord {
   return {
     id: `${CHILD_COMMIT_PREFIX}${commit.oid}`,
     kind: "commit-core",
-    label: firstLine(commit.message),
+    label: sanitizeRepositoryDisplay(firstLine(commit.message)),
     group: "commit-core",
     weight: 3,
     positionHint: [0, 0, 0],
@@ -106,7 +107,7 @@ function fileNodes(oid: string, files: readonly GitCommitFileChange[]): GraphNod
     return {
       id: fileNodeId(oid, change.path),
       kind: fileKind(change),
-      label: change.path,
+      label: sanitizeRepositoryDisplay(change.path),
       group: `status:${change.status}`,
       weight: fileWeight(change),
       positionHint: [Math.cos(angle) * radius, 0, Math.sin(angle) * radius],

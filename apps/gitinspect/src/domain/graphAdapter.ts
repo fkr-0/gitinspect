@@ -14,6 +14,8 @@ export const gitGraphIds = {
   head: "head:HEAD",
 } as const;
 
+import { sanitizeRepositoryDisplay } from "./displaySanitization";
+
 function firstLine(message: string): string {
   return message.split("\n", 1)[0]?.trim() || "(no commit message)";
 }
@@ -101,7 +103,7 @@ export function repositorySnapshotToGraphDataset(snapshot: GitRepositorySnapshot
     return {
       id: gitGraphIds.commit(commit.oid),
       kind: "commit",
-      label: firstLine(commit.message),
+      label: sanitizeRepositoryDisplay(firstLine(commit.message)),
       group: commit.parents.length > 1 ? "merge" : "history",
       weight: 1 + Math.log1p(commit.files.length),
       properties: {
@@ -147,7 +149,7 @@ export function repositorySnapshotToGraphDataset(snapshot: GitRepositorySnapshot
   const refNodes: GraphNodeRecord[] = snapshot.refs.map((ref) => ({
     id: gitGraphIds.ref(ref.name),
     kind: ref.kind,
-    label: refLabel(ref),
+    label: sanitizeRepositoryDisplay(refLabel(ref)),
     group: ref.kind === "stash" ? "stashes" : "refs",
     properties: {
       name: ref.name,
@@ -164,7 +166,7 @@ export function repositorySnapshotToGraphDataset(snapshot: GitRepositorySnapshot
   const remoteNodes: GraphNodeRecord[] = snapshot.remotes.map((remote) => ({
     id: gitGraphIds.remote(remote.name),
     kind: "remote",
-    label: remote.name,
+    label: sanitizeRepositoryDisplay(remote.name),
     group: "remotes",
     properties: {
       name: remote.name,
