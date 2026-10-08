@@ -75,6 +75,25 @@ jobs:
       - name: Build experimental WASM application
         run: pnpm --filter @gitinspect/app exec vite build --config vite.wasm.config.ts
 
+      - name: Guard against duplicate React Three Fiber runtimes
+        run: node scripts/check-single-r3f.mjs apps/gitinspect/dist-wasm
+
+      - name: Install Chromium for the smoke test
+        run: pnpm exec playwright-core install --with-deps chromium
+
+      - name: Smoke-test the built WASM application in a real browser
+        run: >-
+          node scripts/wasm-smoke.mjs apps/gitinspect/dist-wasm wasm.html
+          --hold=25 --shots=smoke-screenshots
+
+      - name: Upload smoke-test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-smoke-screenshots
+          path: smoke-screenshots
+          if-no-files-found: ignore
+
       - name: Assemble documentation-first Pages artifact
         run: |
           set -euo pipefail

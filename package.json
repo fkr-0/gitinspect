@@ -21,10 +21,13 @@
     "release:candidate": "bash scripts/release-check.sh --candidate",
     "release:native-gate-test": "bash scripts/native-release-qualification.sh --self-test",
     "release:native-authority-diagnostics": "bash scripts/native-release-authority-diagnostics.sh --self-test",
-    "release:native-qualify": "bash scripts/native-release-qualification.sh"
+    "release:native-qualify": "bash scripts/native-release-qualification.sh",
+    "check:single-r3f": "node scripts/check-single-r3f.mjs",
+    "wasm:smoke": "node scripts/wasm-smoke.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.10",
+    "playwright-core": "1.60.0",
     "typescript": "7.0.2",
     "vitest": "4.1.11"
   }

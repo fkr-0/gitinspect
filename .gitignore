@@ -11,3 +11,7 @@ apps/gitinspect/src-tauri/gen/
 
 # Local ws-bridge coordination/evidence/tooling; durable outside product history.
 .ws-bridge/
+
+# Generated WebAssembly edition output (built in CI; never committed).
+apps/gitinspect/dist-wasm/
+apps/gitinspect/public/wasm/
